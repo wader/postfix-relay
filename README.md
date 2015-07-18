@@ -30,6 +30,12 @@ smtp:
     - POSTFIX_myhostname=smtp.domain.tld
 ```
 
-## Tips
+## SPF
 
 When sending using your own SMTP server it is probably a very good idea to setup [SPF](https://en.wikipedia.org/wiki/Sender_Policy_Framework) for the domain your sending mail from.
+
+## DKIM
+
+To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail) specifying a white space separated list of domains using `OPENDKIM_DOMAINS`. At conatiner start new key pairs for each domain will be generated if not found in `/etc/opendkim/keys/<domain>"`. To persist the keys make sure to add a host directory volume for `/etc/opendkim/keys`. If your using docker-compose it will automatically take care of moving data volumes between container recreates.
+
+DNS records to configure can be found in the container log or by running `docker exec -ti <container> sh -c "cat /etc/opendkim/keys/*/mail.txt"`.

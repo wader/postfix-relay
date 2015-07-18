@@ -4,6 +4,8 @@ RUN DEBIAN_FRONTEND=noninteractive \
   apt-get update && \
   apt-get -y install \
     postfix \
+    opendkim \
+    opendkim-tools \
     rsyslog
 # Default config:
 # Open relay, trust docker links for firewalling.
@@ -16,7 +18,9 @@ ENV \
   POSTFIX_smtp_tls_security_level=may \
   POSTFIX_smtpd_tls_security_level=none
 COPY rsyslog.conf /etc/rsyslog.conf
+COPY opendkim.conf /etc/opendkim.conf
+RUN mkdir -p /etc/opendkim/keys
 COPY run /root/
-VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix"]
+VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys"]
 EXPOSE 25
 CMD ["/root/run"]

@@ -2,7 +2,37 @@
 # POSTFIX_var env -> postconf -e var=$POSTFIX_var
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix
-trap "service postfix stop; pkill -TERM rsyslogd" SIGTERM SIGINT
+
+# DKIM config
+if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
+  postconf -e milter_protocol=2
+  postconf -e milter_default_action=accept
+  postconf -e smtpd_milters=inet:localhost:12301
+
+  rm -f /etc/opendkim/KeyTable
+  rm -f /etc/opendkim/SigningTable
+
+  for d in $OPENDKIM_DOMAINS ; do
+    DIR="/etc/opendkim/keys/$d"
+    if [ ! -d "$DIR" ] ; then
+      mkdir -p "$DIR"
+      (cd "$DIR" && opendkim-genkey --selector=mail --domain=$d && chown opendkim:opendkim mail.private)
+    fi
+
+    echo "mail._domainkey.$d $d:mail:/etc/opendkim/keys/$d/mail.private" >> /etc/opendkim/KeyTable
+    echo "*@$d mail._domainkey.$d" >> /etc/opendkim/SigningTable
+  done
+
+  echo "DNS records:"
+  for d in $OPENDKIM_DOMAINS ; do
+    cat /etc/opendkim/keys/$d/mail.txt
+  done
+fi
+
+trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
+if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
+  service opendkim start
+fi
 service postfix start
 rsyslogd -n &
 wait
