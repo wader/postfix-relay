@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# unclean container stop might leave pid files around and rsyslogd seems
+# sometimes falsely think it's already running if some other process
+# happens to have its old pid when starting.
+rm -f \
+  /run/opendkim/opendkim.pid \
+  /run/rsyslogd.pid \
+  /var/spool/postfix/pid/master.pid
+
 # POSTFIX_var env -> postconf -e var=$POSTFIX_var
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix
