@@ -1,4 +1,4 @@
-FROM debian:jessie
+FROM debian:jessie-slim
 MAINTAINER Mattias Wadman mattias.wadman@gmail.com
 RUN DEBIAN_FRONTEND=noninteractive \
   apt-get update && \
@@ -6,7 +6,9 @@ RUN DEBIAN_FRONTEND=noninteractive \
     postfix \
     opendkim \
     opendkim-tools \
-    rsyslog
+    rsyslog \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 # Default config:
 # Open relay, trust docker links for firewalling.
 # Try to use TLS when sending to other smtp servers.
