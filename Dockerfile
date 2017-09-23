@@ -23,6 +23,6 @@ COPY rsyslog.conf /etc/rsyslog.conf
 COPY opendkim.conf /etc/opendkim.conf
 RUN mkdir -p /etc/opendkim/keys
 COPY run /root/
-VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys"]
+VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys", "/etc/postfix"]
 EXPOSE 25
 CMD ["/root/run"]
