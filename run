@@ -38,6 +38,8 @@ if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   done
 fi
 
+[ -f /etc/postfix/conf.d/virtual ] && postmap /etc/postfix/conf.d/virtual
+
 trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   service opendkim start

@@ -1,5 +1,5 @@
 FROM debian:jessie-slim
-MAINTAINER Mattias Wadman mattias.wadman@gmail.com
+MAINTAINER Ronan-Yann Lorin rylorin@gmail.com
 RUN \
   apt-get update && \
   apt-get -y install \
@@ -18,11 +18,13 @@ ENV \
   POSTFIX_mydestination=localhost \
   POSTFIX_mynetworks=0.0.0.0/0 \
   POSTFIX_smtp_tls_security_level=may \
-  POSTFIX_smtpd_tls_security_level=none
+  POSTFIX_smtpd_tls_security_level=none \
+  POSTFIX_virtual_alias_domains= \
+  POSTFIX_virtual_alias_maps="hash:/etc/postfix/conf.d/virtual
 COPY rsyslog.conf /etc/rsyslog.conf
 COPY opendkim.conf /etc/opendkim.conf
-RUN mkdir -p /etc/opendkim/keys
+RUN mkdir -p /etc/opendkim/keys /etc/postfix/conf.d
 COPY run /root/
-VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys", "/etc/postfix"]
+VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys", "/etc/postfix/conf.d"]
 EXPOSE 25
 CMD ["/root/run"]
