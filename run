@@ -8,6 +8,8 @@ rm -f \
   /run/rsyslogd.pid \
   /var/spool/postfix/pid/master.pid
 
+postconf -e myhostname=`hostname --fqdn`
+
 # POSTFIX_var env -> postconf -e var=$POSTFIX_var
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix

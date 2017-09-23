@@ -14,13 +14,13 @@ RUN \
 # Try to use TLS when sending to other smtp servers.
 # No TLS for connecting clients, trust docker network to be safe
 ENV \
-  POSTFIX_myhostname=hostname \
   POSTFIX_mydestination=localhost \
   POSTFIX_mynetworks=0.0.0.0/0 \
   POSTFIX_smtp_tls_security_level=may \
-  POSTFIX_smtpd_tls_security_level=none \
+  POSTFIX_smtpd_tls_security_level=may \
   POSTFIX_virtual_alias_domains= \
-  POSTFIX_virtual_alias_maps="hash:/etc/postfix/conf.d/virtual"
+  POSTFIX_virtual_alias_maps="hash:/etc/postfix/conf.d/virtual" \
+  POSTFIX_smtpd_recipient_restrictions="reject_unauth_destination, permit_sasl_authenticated, permit_mynetworks, check_relay_domains"
 COPY rsyslog.conf /etc/rsyslog.conf
 COPY opendkim.conf /etc/opendkim.conf
 RUN mkdir -p /etc/opendkim/keys /etc/postfix/conf.d
