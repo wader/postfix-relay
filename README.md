@@ -3,7 +3,7 @@ Postfix SMTP relay docker image. Useful for sending email without using an
 external SMTP server, or for forward emails for virtual domains.
 
 ## Usage
-`docker pull mwader/postfix-relay` or clone and build it yourself. Default
+`docker pull rylorin/postfix-relay` or clone and build it yourself. Default
 postfix is configured not to be an open relay as it has to be exposed publicly
 on Internet to receive your virtual domains emails.
 
@@ -16,7 +16,7 @@ variables. See [Dockerfile](Dockerfile) for default configuration. You can use
 docker run \
 	-e POSTFIX_myhostname=smtp.domain.tld \
 	--name smtp \
-	mwader/postfix-relay
+	rylorin/postfix-relay
 ```
 
 #### Using docker-compose
@@ -25,7 +25,7 @@ app:
   # use hostname "smtp" as SMTP server
 
 smtp:
-  image: mwader/postfix-relay
+  image: rylorin/postfix-relay
   restart: always
   environment:
     - POSTFIX_myhostname=smtp.domain.tld
@@ -66,7 +66,7 @@ where `mail.site.com.` is your Postfix server address.
 ### Docker host setting
 On your docker host you need to setup a directory which will contains your `virtual` address mapping file.
 This directory will be mounted to the docket image and shared with Postfix.
-Your file should look like:
+Your virtual file should look like:
 ```
 @site.com			superman@gmail.com superman@yahoo.com
 contact@site2.com	superman2@gmail.com
