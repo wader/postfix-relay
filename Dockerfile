@@ -1,8 +1,8 @@
-FROM debian:jessie-slim
+FROM debian:stretch-slim
 MAINTAINER Mattias Wadman mattias.wadman@gmail.com
 RUN \
   apt-get update && \
-  apt-get -y install \
+  apt-get -y --no-install-recommends install \
     postfix \
     opendkim \
     opendkim-tools \
