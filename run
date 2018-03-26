@@ -23,8 +23,12 @@ dkimConfig()
       txtFile=$DIR/$selector.txt
       if [ ! -f "$privateFile" ] ; then
         mkdir -p "$DIR"
-        (cd "$DIR" && opendkim-genkey --selector=$selector --domain=$domain && chown opendkim:opendkim $selector.private)
+        (cd "$DIR" && opendkim-genkey --selector=$selector --domain=$domain)
       fi
+
+      # Ensure strict permissions required by opendkim
+      chown opendkim:opendkim $DIR $privateFile
+      chmod 600 $privateFile
 
       echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
       echo "*@$domain $selector._domainkey.$domain" >> /etc/opendkim/SigningTable
