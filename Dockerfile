@@ -4,6 +4,7 @@ RUN \
   apt-get update && \
   apt-get -y --no-install-recommends install \
     postfix \
+    libsasl2-modules \
     opendkim \
     opendkim-tools \
     rsyslog && \
