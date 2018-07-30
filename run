@@ -1,5 +1,50 @@
 #!/bin/bash
 
+# DKIM config
+dkimConfig()
+{
+  if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
+    postconf -e milter_protocol=2
+    postconf -e milter_default_action=accept
+    postconf -e smtpd_milters=inet:localhost:12301
+
+    rm -f /etc/opendkim/KeyTable
+    rm -f /etc/opendkim/SigningTable
+
+    set $OPENDKIM_SELECTORS
+    for d in $OPENDKIM_DOMAINS ; do
+      if [ -z "$1" ] ; then
+        selector="mail"
+      else
+        selector="$1"
+      fi
+      DIR="/etc/opendkim/keys/$d"
+      if [ ! -d "$DIR" ] ; then
+        mkdir -p "$DIR"
+        (cd "$DIR" && opendkim-genkey --selector=$selector --domain=$d && chown opendkim:opendkim $selector.private)
+      fi
+
+      echo "$selector._domainkey.$d $d:$selector:/etc/opendkim/keys/$d/$selector.private" >> /etc/opendkim/KeyTable
+      echo "*@$d $selector._domainkey.$d" >> /etc/opendkim/SigningTable
+
+      shift
+    done
+
+    echo "DNS records:"
+    set $OPENDKIM_SELECTORS
+    for d in $OPENDKIM_DOMAINS ; do
+      if [ -z "$1" ] ; then
+        selector="mail"
+      else
+        selector="$1"
+      fi
+      cat /etc/opendkim/keys/$d/$selector.txt
+
+      shift
+    done
+  fi
+}
+
 # unclean container stop might leave pid files around and rsyslogd seems
 # sometimes falsely think it's already running if some other process
 # happens to have its old pid when starting.
@@ -12,31 +57,7 @@ rm -f \
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix
 
-# DKIM config
-if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
-  postconf -e milter_protocol=2
-  postconf -e milter_default_action=accept
-  postconf -e smtpd_milters=inet:localhost:12301
-
-  rm -f /etc/opendkim/KeyTable
-  rm -f /etc/opendkim/SigningTable
-
-  for d in $OPENDKIM_DOMAINS ; do
-    DIR="/etc/opendkim/keys/$d"
-    if [ ! -d "$DIR" ] ; then
-      mkdir -p "$DIR"
-      (cd "$DIR" && opendkim-genkey --selector=mail --domain=$d && chown opendkim:opendkim mail.private)
-    fi
-
-    echo "mail._domainkey.$d $d:mail:/etc/opendkim/keys/$d/mail.private" >> /etc/opendkim/KeyTable
-    echo "*@$d mail._domainkey.$d" >> /etc/opendkim/SigningTable
-  done
-
-  echo "DNS records:"
-  for d in $OPENDKIM_DOMAINS ; do
-    cat /etc/opendkim/keys/$d/mail.txt
-  done
-fi
+dkimConfig
 
 trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
