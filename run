@@ -3,7 +3,6 @@
 # DKIM config
 dkimConfig()
 {
-  if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
     postconf -e milter_protocol=2
     postconf -e milter_default_action=accept
     postconf -e smtpd_milters=inet:localhost:12301
@@ -11,38 +10,27 @@ dkimConfig()
     rm -f /etc/opendkim/KeyTable
     rm -f /etc/opendkim/SigningTable
 
-    set $OPENDKIM_SELECTORS
-    for d in $OPENDKIM_DOMAINS ; do
-      if [ -z "$1" ] ; then
-        selector="mail"
-      else
-        selector="$1"
-      fi
-      DIR="/etc/opendkim/keys/$d"
-      if [ ! -d "$DIR" ] ; then
-        mkdir -p "$DIR"
-        (cd "$DIR" && opendkim-genkey --selector=$selector --domain=$d && chown opendkim:opendkim $selector.private)
-      fi
-
-      echo "$selector._domainkey.$d $d:$selector:/etc/opendkim/keys/$d/$selector.private" >> /etc/opendkim/KeyTable
-      echo "*@$d $selector._domainkey.$d" >> /etc/opendkim/SigningTable
-
-      shift
-    done
-
     echo "DNS records:"
-    set $OPENDKIM_SELECTORS
     for d in $OPENDKIM_DOMAINS ; do
-      if [ -z "$1" ] ; then
+      domain=$(echo "$d"| cut -f1 -d '=')
+      selector=$(expr match "$d" '.*\=\(.*\)')
+      if [ -z "$selector" ] ; then
         selector="mail"
-      else
-        selector="$1"
       fi
-      cat /etc/opendkim/keys/$d/$selector.txt
 
-      shift
+      DIR="/etc/opendkim/keys/$domain"
+      privateFile=$DIR/$selector.private
+      txtFile=$DIR/$selector.txt
+      if [ ! -f "$privateFile" ] ; then
+        mkdir -p "$DIR"
+        (cd "$DIR" && opendkim-genkey --selector=$selector --domain=$domain && chown opendkim:opendkim $selector.private)
+      fi
+
+      echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
+      echo "*@$domain $selector._domainkey.$domain" >> /etc/opendkim/SigningTable
+      
+      cat $txtFile
     done
-  fi
 }
 
 # unclean container stop might leave pid files around and rsyslogd seems
@@ -57,10 +45,9 @@ rm -f \
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix
 
-dkimConfig
-
 trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
+  dkimConfig
   service opendkim start
 fi
 service postfix start
