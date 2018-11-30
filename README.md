@@ -8,9 +8,13 @@ So be careful to not expose it publicly.
 ## Usage
 `docker pull mwader/postfix-relay` or clone/build it yourself. 
 
-All postfix configuration options can be set using `POSTFIX_<name>` environment
+All postfix [configuration options](http://www.postfix.org/postconf.5.html)
+can be set using `POSTFIX_<name>` environment
 variables. See [Dockerfile](Dockerfile) for default configuration. You probably
 want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO).
+
+Note that `POSTFIX_myhostname` will change the postfix option
+[myhostname](http://www.postfix.org/postconf.5.html#myhostname).
 
 #### Using docker run
 ```
