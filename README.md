@@ -41,17 +41,18 @@ domain you're sending from.
 
 ## DKIM
 To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail),
-specify a whitespace separated list of domains in the environment variable
-`OPENDKIM_DOMAINS`. At container start, key pairs for each domain will be
-generated if not found in `/etc/opendkim/keys/<domain>`. To persist keys, make
-sure to mount a volume for `/etc/opendkim/keys`. If you're using
-docker-compose, it will automatically take care of moving data volumes between
-container recreates.
+specify a whitespace-separated list of domains in the environment variable
+`OPENDKIM_DOMAINS`. The default DKIM selector is "mail", but can be changed to
+"<selector>" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
+
+At container start, RSA key pairs will be generated for each domain unless the
+file `/etc/opendkim/keys/<domain>/<selector>.private` exists. If you want the
+keys to persist indefinitely, make sure to mount a volume for
+`/etc/opendkim/keys`, otherwise they will be destroyed when the container is
+removed.
 
 DNS records to configure can be found in the container log or by running
 `docker exec <container> cat /etc/opendkim/keys/*/*.txt`.
-
-Default selector is "mail" but can be changed using the syntax `domain.tld=abc`.
 
 ## License
 postfix-relay is licensed under the MIT license. See [LICENSE](LICENSE) for the
