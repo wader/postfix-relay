@@ -2,8 +2,8 @@
 Postfix SMTP relay docker image. Useful for sending email without using an
 external SMTP server.
 
-Default configuration is an open relay that rely on docker networking for protection.
-So be careful to not expose it publicly.
+Default configuration is an open relay that relies on docker networking for
+protection. So be careful to not expose it publicly.
 
 ## Usage
 `docker pull mwader/postfix-relay` or clone/build it yourself. 
@@ -37,15 +37,15 @@ smtp:
 ## SPF
 When sending email using your own SMTP server it is probably a good idea
 to setup [SPF](https://en.wikipedia.org/wiki/Sender_Policy_Framework) for the
-domain your sending from.
+domain you're sending from.
 
 ## DKIM
-To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail)
-specify a white space separated list of domains in the environment variable
-`OPENDKIM_DOMAINS`. At container start key pairs for each domain will be
-generated if not found in `/etc/opendkim/keys/<domain>`. To persist keys make
-sure to mount a volume for `/etc/opendkim/keys`. If your using
-docker-compose it will automatically take care of moving data volumes between
+To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail),
+specify a whitespace separated list of domains in the environment variable
+`OPENDKIM_DOMAINS`. At container start, key pairs for each domain will be
+generated if not found in `/etc/opendkim/keys/<domain>`. To persist keys, make
+sure to mount a volume for `/etc/opendkim/keys`. If you're using
+docker-compose, it will automatically take care of moving data volumes between
 container recreates.
 
 DNS records to configure can be found in the container log or by running
