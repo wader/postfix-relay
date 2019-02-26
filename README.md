@@ -52,7 +52,7 @@ keys to persist indefinitely, make sure to mount a volume for
 removed.
 
 DNS records to configure can be found in the container log or by running
-`docker exec <container> cat /etc/opendkim/keys/*/*.txt`.
+`docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt'`.
 
 ## License
 postfix-relay is licensed under the MIT license. See [LICENSE](LICENSE) for the
