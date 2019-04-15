@@ -43,7 +43,7 @@ domain you're sending from.
 To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail),
 specify a whitespace-separated list of domains in the environment variable
 `OPENDKIM_DOMAINS`. The default DKIM selector is "mail", but can be changed to
-"<selector>" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
+"`<selector>`" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
 
 At container start, RSA key pairs will be generated for each domain unless the
 file `/etc/opendkim/keys/<domain>/<selector>.private` exists. If you want the
