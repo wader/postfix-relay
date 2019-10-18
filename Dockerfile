@@ -8,6 +8,7 @@ RUN \
     libsasl2-modules \
     opendkim \
     opendkim-tools \
+    ca-certificates \
     rsyslog && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
