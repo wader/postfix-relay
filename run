@@ -18,26 +18,26 @@ dkimConfig()
         selector="mail"
       fi
 
-      DIR="/etc/opendkim/keys/$domain"
-      privateFile=$DIR/$selector.private
-      txtFile=$DIR/$selector.txt
+      domainDir="/etc/opendkim/keys/$domain"
+      privateFile="$domainDir/$selector.private"
+      txtFile="$domainDir/$selector.txt"
       if [ ! -f "$privateFile" ] ; then
-        mkdir -p "$DIR"
-        (cd "$DIR" && opendkim-genkey --selector=$selector --domain=$domain)
+        mkdir -p "$domainDir"
+        (cd "$domainDir" && opendkim-genkey --selector=$selector --domain=$domain)
       fi
 
       # Ensure strict permissions required by opendkim
-      chown opendkim:opendkim $DIR $privateFile
-      chmod 600 $privateFile
+      chown opendkim:opendkim "$domainDir" "$privateFile"
+      chmod a=,u=rw "$privateFile"
 
       echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
       echo "*@$domain $selector._domainkey.$domain" >> /etc/opendkim/SigningTable
       
-      cat $txtFile
+      cat "$txtFile"
     done
 }
 
-# unclean container stop might leave pid files around and rsyslogd seems
+# Unclean container stop might leave pid files around and rsyslogd seems
 # sometimes falsely think it's already running if some other process
 # happens to have its old pid when starting.
 rm -f \
