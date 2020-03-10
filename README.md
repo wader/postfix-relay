@@ -51,8 +51,14 @@ keys to persist indefinitely, make sure to mount a volume for
 `/etc/opendkim/keys`, otherwise they will be destroyed when the container is
 removed.
 
-DNS records to configure can be found in the container log or by running
-`docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt'`.
+DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt` you should see something like this:
+```bash
+$ docker exec 7996454b5fca sh -c 'cat /etc/opendkim/keys/*/*.txt'
+
+mail._domainkey.smtp.domain.tld. IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
+	  "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Dx7wLGPFVaxVQ4TGym/eF89aQ8oMxS9v5BCc26Hij91t2Ci8Fl12DHNVqZoIPGm+9tTIoDVDFEFrlPhMOZl8i4jU9pcFjjaIISaV2+qTa8uV1j3MyByogG8pu4o5Ill7zaySYFsYB++cHJ9pjbFSC42dddCYMfuVgrBsLNrvEi3dLDMjJF5l92Uu8YeswFe26PuHX3Avr261n"
+	  "j5joTnYwat4387VEUyGUnZ0aZxCERi+ndXv2/wMJ0tizq+a9+EgqIb+7lkUc2XciQPNuTujM25GhrQBEKznvHyPA6fHsFheymOuB763QpkmnQQLCxyLygAY9mE/5RY+5Q6J9oDOQIDAQAB" )  ; ----- DKIM key mail for smtp.domain.tld
+```
 
 ## License
 postfix-relay is licensed under the MIT license. See [LICENSE](LICENSE) for the
