@@ -24,7 +24,7 @@ dkimConfig()
       if [ ! -f "$privateFile" ] ; then
         echo "No DKIM private key found for selector '$selector' in domain '$domain'. Generating one now..."
         mkdir -p "$domainDir"
-        opendkim-genkey -D "$domainDir" --selector=$selector --domain=$domain
+        opendkim-genkey -D "$domainDir" --selector=$selector --domain=$domain --append-domain
       fi
 
       # Ensure strict permissions required by opendkim
