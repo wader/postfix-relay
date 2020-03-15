@@ -27,15 +27,15 @@ dkimConfig()
         opendkim-genkey -D "$domainDir" --selector=$selector --domain=$domain --append-domain
       fi
 
-      # Ensure strict permissions required by opendkim
-      chown opendkim:opendkim "$domainDir" "$privateFile"
-      chmod a=,u=rw "$privateFile"
-
       echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
       echo "*@$domain $selector._domainkey.$domain" >> /etc/opendkim/SigningTable
       
       cat "$txtFile"
     done
+
+    # Ensure strict permissions required by opendkim
+    chown -R opendkim:opendkim "/etc/opendkim/keys"
+    chmod -R g=,o= "/etc/opendkim/keys"
 }
 
 # Unclean container stop might leave pid files around and rsyslogd seems
