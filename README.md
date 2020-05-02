@@ -1,15 +1,10 @@
 # postfix-relay
-Postfix SMTP relay docker image. Useful for sending email without using an
-external SMTP server, or for forward emails for virtual domains.
+Postfix SMTP relay docker image. Useful for sending email without using an external SMTP server, or for forward emails for virtual domains.
 
 ## Usage
-`docker pull rylorin/postfix-relay` or clone and build it yourself. Default
-postfix is configured not to be an open relay as it has to be exposed publicly
-on Internet to receive your virtual domains emails.
+`docker pull rylorin/postfix-relay` or clone and build it yourself. Default postfix is configured not to be an open relay as it has to be exposed publicly on Internet to receive your virtual domains emails.
 
-All postfix configuration options can be set using `POSTFIX_<name>` environment
-variables. See [Dockerfile](Dockerfile) for default configuration. You can use
-`POSTFIX_myhostname` to set the FQDN used by 220/HELO.
+All postfix configuration options can be set using `POSTFIX_<name>` environment variables. See [Dockerfile](Dockerfile) for default configuration. You can use `POSTFIX_myhostname` to set the FQDN used by 220/HELO.
 
 #### Using docker run
 ```

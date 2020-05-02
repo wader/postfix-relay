@@ -1,6 +1,7 @@
 FROM debian:jessie-slim
 MAINTAINER Ronan-Yann Lorin rylorin@gmail.com
-RUN \
+
+RUN set -eux; \
   apt-get update && \
   apt-get -y install \
     postfix \
@@ -13,6 +14,7 @@ RUN \
 # Open relay, trust docker links for firewalling.
 # Try to use TLS when sending to other smtp servers.
 # No TLS for connecting clients, trust docker network to be safe
+
 ENV \
   POSTFIX_mydestination=localhost \
   POSTFIX_mynetworks=0.0.0.0/0 \
@@ -25,6 +27,9 @@ COPY rsyslog.conf /etc/rsyslog.conf
 COPY opendkim.conf /etc/opendkim.conf
 RUN mkdir -p /etc/opendkim/keys /etc/postfix/conf.d
 COPY run /root/
+
 VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys", "/etc/postfix/conf.d"]
+
 EXPOSE 25
+
 CMD ["/root/run"]
