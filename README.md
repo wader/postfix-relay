@@ -8,20 +8,23 @@ protection. So be careful to not expose it publicly.
 ## Usage
 `docker pull mwader/postfix-relay` or clone/build it yourself. 
 
-All postfix [configuration options](http://www.postfix.org/postconf.5.html)
-can be set using `POSTFIX_<name>` environment
-variables. See [Dockerfile](Dockerfile) for default configuration. You probably
-want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO).
+Postfix [configuration options](http://www.postfix.org/postconf.5.html) can be set
+using `POSTFIX_<name>` environment variables. See [Dockerfile](Dockerfile) for default
+configuration. You probably want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO).
 
 Note that `POSTFIX_myhostname` will change the postfix option
 [myhostname](http://www.postfix.org/postconf.5.html#myhostname).
 
-#### Using docker run
+OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can be set
+using `OPENDKIM_<name>` environment variables. See [Dockerfile](Dockerfile) for default
+configuration. For example `OPENDKIM_Canonicalization=relaxed/simple`.
+
+### Using docker run
 ```
 docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
 ```
 
-#### Using docker-compose
+### Using docker-compose
 ```
 app:
   # use hostname "smtp" as SMTP server
@@ -33,6 +36,16 @@ smtp:
     - POSTFIX_myhostname=smtp.domain.tld
     - OPENDKIM_DOMAINS=smtp.domain.tld
 ```
+
+### Known issues
+
+#### I see `key data is not secure: /etc/opendkim/keys can be read or written by other users` error messages.
+
+Some Docker distributions like Docker for Windows and RancherOS seems to handle
+volume permission in way that does not work with OpenDKIM default behavior of
+ensuring safe permissions on private keys.
+
+A workaround is to disable the check using a `OPENDKIM_RequireSafeKeys=no` environment variable.
 
 ## SPF
 When sending email using your own SMTP server it is probably a good idea
