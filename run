@@ -50,6 +50,15 @@ rm -f \
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix
 
+# OPENDKIM_var env -> put "key value" line in /etc/opendkim.conf
+echo -n > /etc/opendkim.conf
+for e in ${!OPENDKIM_*} ; do
+  if [ "$e" == "OPENDKIM_DOMAINS" ] ; then
+    continue
+  fi
+  echo "${e:9} ${!e}" >> /etc/opendkim.conf
+done
+
 trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
