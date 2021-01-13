@@ -6,7 +6,7 @@ Default configuration is an open relay that relies on docker networking for
 protection. So be careful to not expose it publicly.
 
 ## Usage
-`docker pull mwader/postfix-relay` or clone/build it yourself. 
+`docker pull mwader/postfix-relay` or clone/build it yourself. Docker hub image is built for `amd64`, `arm/v7` and `arm64`.
 
 Postfix [configuration options](http://www.postfix.org/postconf.5.html) can be set
 using `POSTFIX_<name>` environment variables. See [Dockerfile](Dockerfile) for default
