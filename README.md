@@ -15,6 +15,18 @@ configuration. You probably want to set `POSTFIX_myhostname` (the FQDN used by 2
 Note that `POSTFIX_myhostname` will change the postfix option
 [myhostname](http://www.postfix.org/postconf.5.html#myhostname).
 
+You can modify master.cf using postconf with `POSTFIXMASTER_` variables. All double `__` symbols will be replaced with `/`. For example
+
+```
+- POSTFIXMASTER_submission__inet=submission inet n - y - - smtpd
+```
+will produce
+
+```
+postconf -Me submission/inet="submission inet n - y - - smtpd"
+```
+
+
 OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can be set
 using `OPENDKIM_<name>` environment variables. See [Dockerfile](Dockerfile) for default
 configuration. For example `OPENDKIM_Canonicalization=relaxed/simple`.
