@@ -49,6 +49,18 @@ smtp:
     - OPENDKIM_DOMAINS=smtp.domain.tld
 ```
 
+### Logging
+By default container only logs to stdout. If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
+
+```
+environment:
+  ...
+  - RSYSLOG_LOG_TO_FILE=yes
+  - RSYSLOG_TIMESTAMP=yes
+volumes:
+  - /your_local_path:/var/log/
+```
+
 ### Known issues
 
 #### I see `key data is not secure: /etc/opendkim/keys can be read or written by other users` error messages.
