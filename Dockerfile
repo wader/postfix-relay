@@ -12,7 +12,8 @@ RUN \
     ca-certificates \
     rsyslog && \
   apt-get clean && \
-  rm -rf /var/lib/apt/lists/*
+  rm -rf /var/lib/apt/lists/* \
+    /etc/rsyslog.conf
 # Default config:
 # Open relay, trust docker links for firewalling.
 # Try to use TLS when sending to other smtp servers.
@@ -29,8 +30,9 @@ ENV \
   OPENDKIM_Syslog=yes \
   OPENDKIM_InternalHosts="0.0.0.0/0, ::/0" \
   OPENDKIM_KeyTable=refile:/etc/opendkim/KeyTable \
-  OPENDKIM_SigningTable=refile:/etc/opendkim/SigningTable
-COPY rsyslog.conf /etc/rsyslog.conf
+  OPENDKIM_SigningTable=refile:/etc/opendkim/SigningTable \
+  RSYSLOG_TIMESTAMP=no \
+  RSYSLOG_LOG_TO_FILE=no
 RUN mkdir -p /etc/opendkim/keys
 COPY run /root/
 VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys"]
