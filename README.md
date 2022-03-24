@@ -8,6 +8,8 @@ protection. So be careful to not expose it publicly.
 ## Usage
 `docker pull mwader/postfix-relay` or clone/build it yourself. Docker hub image is built for `amd64`, `arm/v7` and `arm64`.
 
+### Postfix variables
+
 Postfix [configuration options](http://www.postfix.org/postconf.5.html) can be set
 using `POSTFIX_<name>` environment variables. See [Dockerfile](Dockerfile) for default
 configuration. You probably want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO).
@@ -16,6 +18,8 @@ Note that `POSTFIX_myhostname` will change the postfix option
 [myhostname](http://www.postfix.org/postconf.5.html#myhostname).
 
 You can modify master.cf using postconf with `POSTFIXMASTER_` variables. All double `__` symbols will be replaced with `/`. For example
+
+### Postfix master.cf variables
 
 ```
 - POSTFIXMASTER_submission__inet=submission inet n - y - - smtpd
@@ -26,6 +30,26 @@ will produce
 postconf -Me submission/inet="submission inet n - y - - smtpd"
 ```
 
+### Postfix lookup tables
+
+You can also create multiline [tables](http://www.postfix.org/DATABASE_README.html#types) using `POSTMAP_<filename>` like this example:
+```
+environment:
+  - POSTFIX_transport_maps=hash:/etc/postfix/transport
+  - |
+    POSTMAP_transport=gmail.com smtp
+    mydomain.com relay:[relay1.mydomain.com]:587
+    * relay:[relay2.mydomain.com]:587
+```
+which will generate file `/etc/postfix/transport`
+```
+gmail.com smtp
+mydomain.com relay:[relay1.mydomain.com]:587
+* relay:[relay2.mydomain.com]:587
+```
+and run `postmap /etc/postfix/transport`.
+
+### OpenDKIM variables
 
 OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can be set
 using `OPENDKIM_<name>` environment variables. See [Dockerfile](Dockerfile) for default
