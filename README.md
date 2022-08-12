@@ -85,6 +85,26 @@ volumes:
   - /your_local_path:/var/log/
 ```
 
+You can also forward log output to some remote syslog server, like Graylog. It always uses UDP protocol and port 514 as default value,
+port number can be changed to another one.
+
+```
+environment:
+  ...
+  - RSYSLOG_REMOTE_IP=my.remote-syslog-server.com
+  - RSYSLOG_REMOTE_PORT=5140
+```
+
+### Timezone
+Wrong timestamps in log can be fixed by setting proper timezone.
+This parameter is handled by source Debian image.
+
+```
+environment:
+  ...
+  - TZ=Europe/Prague
+```
+
 ### Known issues
 
 #### I see `key data is not secure: /etc/opendkim/keys can be read or written by other users` error messages.

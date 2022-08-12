@@ -89,6 +89,13 @@ EOF
   if [ "${RSYSLOG_LOG_TO_FILE}" == 'yes' ] ; then
     echo 'mail.* -/var/log/mail.log' >> /etc/rsyslog.conf
   fi
+
+  if [ ! ${RSYSLOG_REMOTE_PORT} ] ; then
+    RSYSLOG_REMOTE_PORT=514
+  fi
+  if [ ${RSYSLOG_REMOTE_IP} ] ; then
+    echo "*.* action(type=\"omfwd\" target=\"${RSYSLOG_REMOTE_IP}\" port=\"${RSYSLOG_REMOTE_PORT}\" template=\"RSYSLOG_SyslogProtocol23Format\")" >> /etc/rsyslog.conf
+  fi
 fi
 
 rsyslogd -n &
