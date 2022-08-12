@@ -85,19 +85,21 @@ volumes:
   - /your_local_path:/var/log/
 ```
 
-You can also forward log output to some remote syslog server, like Graylog. It always uses UDP protocol and port 514 as default value,
-port number can be changed to another one.
+You can also forward log output to remote syslog server if you define `RSYSLOG_REMOTE_HOST` variable. It always uses UDP protocol and port `514` as default value,
+port number can be changed to different one with `RSYSLOG_REMOTE_PORT`. Default format of forwarded messages is defined by Rsyslog template `RSYSLOG_ForwardFormat`,
+you can change it to [another template](http://opendkim.org/opendkim.conf.5.html) (section Reserved Template Names) if you wish with `RSYSLOG_REMOTE_TEMPLATE` variable.
 
 ```
 environment:
   ...
-  - RSYSLOG_REMOTE_IP=my.remote-syslog-server.com
-  - RSYSLOG_REMOTE_PORT=5140
+  - RSYSLOG_REMOTE_HOST=my.remote-syslog-server.com
+  - RSYSLOG_REMOTE_PORT=514
+  - RSYSLOG_REMOTE_TEMPLATE=RSYSLOG_ForwardFormat
 ```
 
 ### Timezone
 Wrong timestamps in log can be fixed by setting proper timezone.
-This parameter is handled by source Debian image.
+This parameter is handled by Debian base image.
 
 ```
 environment:
