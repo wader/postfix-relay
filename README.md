@@ -97,6 +97,10 @@ environment:
   - RSYSLOG_REMOTE_TEMPLATE=RSYSLOG_ForwardFormat
 ```
 
+#### Advanced logging configuration
+
+If configuration via environment variables is not flexible enough it's possible to configure rsyslog directly: `.conf` files in the `/etc/rsyslog.d` directory will be [sorted alphabetically](https://www.rsyslog.com/doc/v8-stable/rainerscript/include.html#file) and included into the primary configuration.
+
 ### Timezone
 Wrong timestamps in log can be fixed by setting proper timezone.
 This parameter is handled by Debian base image.
