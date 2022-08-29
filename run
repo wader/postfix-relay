@@ -78,6 +78,9 @@ else
   cat <<'EOF' > /etc/rsyslog.conf
 $ModLoad imuxsock
 $WorkDirectory /var/spool/rsyslog
+
+include(file="/etc/rsyslog.d/*.conf")
+
 *.*;auth,authpriv.none /dev/stdout
 EOF
 
