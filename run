@@ -1,6 +1,44 @@
 #!/bin/bash
 
-# unclean container stop might leave pid files around and rsyslogd seems
+# DKIM config
+dkimConfig()
+{
+    postconf -e milter_protocol=2
+    postconf -e milter_default_action=accept
+    postconf -e smtpd_milters=inet:localhost:12301
+
+    rm -f /etc/opendkim/KeyTable
+    rm -f /etc/opendkim/SigningTable
+
+    echo "DNS records:"
+    for d in $OPENDKIM_DOMAINS ; do
+      domain=$(echo "$d"| cut -f1 -d '=')
+      selector=$(expr match "$d" '.*\=\(.*\)')
+      if [ -z "$selector" ] ; then
+        selector="mail"
+      fi
+
+      domainDir="/etc/opendkim/keys/$domain"
+      privateFile="$domainDir/$selector.private"
+      txtFile="$domainDir/$selector.txt"
+      if [ ! -f "$privateFile" ] ; then
+        echo "No DKIM private key found for selector '$selector' in domain '$domain'. Generating one now..."
+        mkdir -p "$domainDir"
+        opendkim-genkey -D "$domainDir" --selector=$selector --domain=$domain --append-domain
+      fi
+
+      # Ensure strict permissions required by opendkim
+      chown opendkim:opendkim "$domainDir" "$privateFile"
+      chmod a=,u=rw "$privateFile"
+
+      echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
+      echo "*@$domain $selector._domainkey.$domain" >> /etc/opendkim/SigningTable
+
+      cat "$txtFile"
+    done
+}
+
+# Unclean container stop might leave pid files around and rsyslogd seems
 # sometimes falsely think it's already running if some other process
 # happens to have its old pid when starting.
 rm -f \
@@ -12,41 +50,64 @@ postconf -e myhostname=`hostname --fqdn`
 
 # POSTFIX_var env -> postconf -e var=$POSTFIX_var
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
+# POSTFIXMASTER_var env -> postconf -Me var=$POSTFIXMASTER_var + replace __ with /
+for e in ${!POSTFIXMASTER_*} ; do v="${e:14}" && postconf -Me "${v/__/\/}=${!e}"; done
+# POSTMAP_var env value -> /etc/postfix/var
+for e in ${!POSTMAP_*} ; do echo "${!e}" > "/etc/postfix/${e:8}" && postmap "/etc/postfix/${e:8}"; done
 chown -R postfix:postfix /var/lib/postfix /var/mail /var/spool/postfix
 
-# DKIM config
-if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
-  postconf -e milter_protocol=2
-  postconf -e milter_default_action=accept
-  postconf -e smtpd_milters=inet:localhost:12301
-
-  rm -f /etc/opendkim/KeyTable
-  rm -f /etc/opendkim/SigningTable
-
-  for d in $OPENDKIM_DOMAINS ; do
-    DIR="/etc/opendkim/keys/$d"
-    if [ ! -d "$DIR" ] ; then
-      mkdir -p "$DIR"
-      (cd "$DIR" && opendkim-genkey --selector=mail --domain=$d && chown opendkim:opendkim mail.private)
-    fi
-
-    echo "mail._domainkey.$d $d:mail:/etc/opendkim/keys/$d/mail.private" >> /etc/opendkim/KeyTable
-    echo "*@$d mail._domainkey.$d" >> /etc/opendkim/SigningTable
-  done
-
-  echo "DNS records:"
-  for d in $OPENDKIM_DOMAINS ; do
-    cat /etc/opendkim/keys/$d/mail.txt
-  done
-fi
+# OPENDKIM_var env -> put "key value" line in /etc/opendkim.conf
+echo -n > /etc/opendkim.conf
+for e in ${!OPENDKIM_*} ; do
+  if [ "$e" == "OPENDKIM_DOMAINS" ] ; then
+    continue
+  fi
+  echo "${e:9} ${!e}" >> /etc/opendkim.conf
+done
 
 [ -f /etc/postfix/conf.d/virtual ] && postmap /etc/postfix/conf.d/virtual
 
 trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
+  dkimConfig
   service opendkim start
 fi
 service postfix start
+
+# Don't fiddle with existing config file (e.g. mounted from filesystem)
+if [ -e /etc/rsyslog.conf ]; then
+  echo "Skipping /etc/rsyslog.conf generating - file already exists"
+else
+  # Rsyslog base
+  cat <<'EOF' > /etc/rsyslog.conf
+$ModLoad imuxsock
+$WorkDirectory /var/spool/rsyslog
+
+include(file="/etc/rsyslog.d/*.conf")
+
+*.*;auth,authpriv.none /dev/stdout
+EOF
+
+  if [ "${RSYSLOG_TIMESTAMP}" == 'no' ] ; then
+    echo '$template noTimestampFormat,"%syslogtag%%msg%\n"' >> /etc/rsyslog.conf
+    echo '$ActionFileDefaultTemplate noTimestampFormat' >> /etc/rsyslog.conf
+  fi
+
+  if [ "${RSYSLOG_LOG_TO_FILE}" == 'yes' ] ; then
+    echo 'mail.* -/var/log/mail.log' >> /etc/rsyslog.conf
+  fi
+
+  if [ -z ${RSYSLOG_REMOTE_PORT} ] ; then
+    RSYSLOG_REMOTE_PORT=514
+  fi
+  if [ -z ${RSYSLOG_REMOTE_TEMPLATE} ] ; then
+    RSYSLOG_REMOTE_TEMPLATE=RSYSLOG_ForwardFormat
+  fi
+  if [ ! -z ${RSYSLOG_REMOTE_HOST} ] ; then
+    echo "*.* action(type=\"omfwd\" target=\"${RSYSLOG_REMOTE_HOST}\" port=\"${RSYSLOG_REMOTE_PORT}\" template=\"${RSYSLOG_REMOTE_TEMPLATE}\")" >> /etc/rsyslog.conf
+  fi
+fi
+
 rsyslogd -n &
 wait
 exit 0
