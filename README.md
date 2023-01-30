@@ -49,6 +49,31 @@ mydomain.com relay:[relay1.mydomain.com]:587
 ```
 and run `postmap /etc/postfix/transport`.
 
+### Relay Client Authentication
+The container includes [Postfix SASL](https://www.postfix.org/SASL_README.html) authentication options that are disabled by default.
+
+#### Example Basic Client PAM Auth
+First, create a passwd file.
+
+```
+echo "myuser:"`docker run --rm mwader/postfix-relay mkpasswd -m sha-512 "mypassword"` >> passwd_file
+```
+
+Then mount the passwd file and add the following postfix configs via enviromental variable.
+
+```
+volumes:
+  - /path/to/passwd_file:/etc/postfix/sasl/sasl_passwds
+environment:
+  - SASL_Passwds=/etc/postfix/sasl/sasl_passwds
+  - POSTFIX_cyrus_sasl_config_path=/etc/postfix/sasl
+  - POSTFIX_smtpd_sasl_local_domain=$myhostname
+  - POSTFIX_smtpd_sasl_auth_enable=yes
+  - POSTFIX_broken_sasl_auth_clients=yes
+  - POSTFIX_smtpd_sasl_security_options=noanonymous
+  - POSTFIX_smtpd_recipient_restrictions="permit_sasl_authenticated, permit_mynetworks, reject_unauth_destination"
+```
+
 ### OpenDKIM variables
 
 OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can be set

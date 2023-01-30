@@ -7,6 +7,9 @@ RUN \
     procps \
     postfix \
     libsasl2-modules \
+	libpam-pwdfile \
+	sasl2-bin \
+	whois \
     opendkim \
     opendkim-tools \
     ca-certificates \
@@ -32,7 +35,8 @@ ENV \
   OPENDKIM_KeyTable=refile:/etc/opendkim/KeyTable \
   OPENDKIM_SigningTable=refile:/etc/opendkim/SigningTable \
   RSYSLOG_TIMESTAMP=no \
-  RSYSLOG_LOG_TO_FILE=no
+  RSYSLOG_LOG_TO_FILE=no \
+  SASL_Passwds=""
 RUN mkdir -p /etc/opendkim/keys
 COPY run /root/
 VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys"]

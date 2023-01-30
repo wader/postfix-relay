@@ -68,6 +68,39 @@ if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
   service opendkim start
 fi
+
+# Checking for user specified passwd file
+if [ ! -z "$SASL_Passwds" ] || [ -e "/etc/pam.d/smtp"] ; then
+  # Creating auth settings file
+  if [ ! -e /etc/postfix/sasl/smtpd.conf ] ; then
+    cat <<'EOF' > /etc/postfix/sasl/smtpd.conf
+pwcheck_method: saslauthd
+mech_list: CRAM-MD5 DIGEST-MD5 LOGIN PLAIN
+EOF
+  fi
+  
+  # Updating saslauthd config to work with chroot
+  sed -i 's|START=no|START=yes|' /etc/default/saslauthd
+  sed -i 's|OPTIONS="-c -m /var/run/saslauthd"|OPTIONS="-c -r -m /var/spool/postfix/var/run/saslauthd"|' /etc/default/saslauthd
+  dpkg-statoverride --add root sasl 710 /var/spool/postfix/var/run/saslauthd
+  
+  # Giving postfix permission to use saslauthd
+  adduser postfix sasl
+  
+  # Creating PAM authentication profile
+  if [ ! -e "/etc/pam.d/smtp" ] ; then
+	echo "$SASL_Passwds"
+    cat <<EOF > /etc/pam.d/smtp
+auth            required        pam_pwdfile.so pwdfile=$SASL_Passwds
+account         required        pam_permit.so
+session         required        pam_permit.so
+password        required        pam_deny.so
+EOF
+  fi
+  
+  service saslauthd start
+fi
+
 service postfix start
 
 # Don't fiddle with existing config file (e.g. mounted from filesystem)
