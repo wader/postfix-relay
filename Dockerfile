@@ -7,9 +7,9 @@ RUN \
     procps \
     postfix \
     libsasl2-modules \
-	libpam-pwdfile \
-	sasl2-bin \
-	whois \
+    libpam-pwdfile \
+    sasl2-bin \
+    whois \
     opendkim \
     opendkim-tools \
     ca-certificates \
