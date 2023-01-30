@@ -70,7 +70,7 @@ if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
 fi
 
 # Checking for user specified passwd file
-if [ ! -z "$SASL_Passwds" ] || [ -e "/etc/pam.d/smtp"] ; then
+if [ ! -z "$SASL_Passwds" ] ; then
   # Creating auth settings file
   if [ ! -e /etc/postfix/sasl/smtpd.conf ] ; then
     cat <<'EOF' > /etc/postfix/sasl/smtpd.conf
@@ -89,7 +89,6 @@ EOF
   
   # Creating PAM authentication profile
   if [ ! -e "/etc/pam.d/smtp" ] ; then
-	echo "$SASL_Passwds"
     cat <<EOF > /etc/pam.d/smtp
 auth            required        pam_pwdfile.so pwdfile=$SASL_Passwds
 account         required        pam_permit.so
