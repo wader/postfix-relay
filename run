@@ -63,7 +63,7 @@ for e in ${!OPENDKIM_*} ; do
   echo "${e:9} ${!e}" >> /etc/opendkim.conf
 done
 
-trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd; service saslauthd stop" SIGTERM SIGINT
+trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd; pkill -TERM saslauthd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
   service opendkim start
@@ -80,8 +80,6 @@ EOF
   fi
   
   # Updating saslauthd config to work with chroot
-  sed -i 's|START=no|START=yes|' /etc/default/saslauthd
-  sed -i 's|OPTIONS="-c -m /var/run/saslauthd"|OPTIONS="-c -r -m /var/spool/postfix/var/run/saslauthd"|' /etc/default/saslauthd
   dpkg-statoverride --add root sasl 710 /var/spool/postfix/var/run/saslauthd
   
   # Giving postfix permission to use saslauthd
@@ -97,7 +95,8 @@ password        required        pam_deny.so
 EOF
   fi
   
-  service saslauthd start
+  mkdir -p /var/spool/postfix/var/run/saslauthd
+  saslauthd -c -r -a pam -m /var/spool/postfix/var/run/saslauthd &
 fi
 
 service postfix start
