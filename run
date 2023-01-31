@@ -63,7 +63,7 @@ for e in ${!OPENDKIM_*} ; do
   echo "${e:9} ${!e}" >> /etc/opendkim.conf
 done
 
-trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd" SIGTERM SIGINT
+trap "service postfix stop; service opendkim stop; pkill -TERM rsyslogd; service saslauthd stop" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
   service opendkim start
