@@ -1,5 +1,5 @@
 # bump: debian-buster-slim /FROM debian:(.*)/ docker:debian|/^buster-.*-slim/|sort
-FROM debian:buster-20230208-slim
+FROM debian:buster-20230227-slim
 MAINTAINER Mattias Wadman mattias.wadman@gmail.com
 RUN \
   apt-get update && \
