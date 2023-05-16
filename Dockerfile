@@ -32,7 +32,7 @@ ENV \
   OPENDKIM_UMask=002 \
   OPENDKIM_Syslog=yes \
   OPENDKIM_InternalHosts="0.0.0.0/0, ::/0" \
-  OPENDKIM_KeyTable=/etc/opendkim/KeyTable \
+  OPENDKIM_KeyTable=refile:/etc/opendkim/KeyTable \
   OPENDKIM_SigningTable=refile:/etc/opendkim/SigningTable \
   RSYSLOG_TIMESTAMP=no \
   RSYSLOG_LOG_TO_FILE=no \
