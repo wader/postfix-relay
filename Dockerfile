@@ -31,6 +31,7 @@ ENV \
   OPENDKIM_Mode=sv \
   OPENDKIM_UMask=002 \
   OPENDKIM_Syslog=yes \
+  OPENDKIM_TrustAnchorFile=/usr/share/dns/root.key \
   OPENDKIM_InternalHosts="0.0.0.0/0, ::/0" \
   OPENDKIM_KeyTable=/etc/opendkim/KeyTable \
   OPENDKIM_SigningTable=refile:/etc/opendkim/SigningTable \
