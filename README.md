@@ -71,7 +71,7 @@ environment:
   - POSTFIX_smtpd_sasl_auth_enable=yes
   - POSTFIX_broken_sasl_auth_clients=yes
   - POSTFIX_smtpd_sasl_security_options=noanonymous
-  - POSTFIX_smtpd_recipient_restrictions="permit_sasl_authenticated, permit_mynetworks, reject_unauth_destination"
+  - POSTFIX_smtpd_recipient_restrictions=permit_sasl_authenticated,permit_mynetworks,reject_unauth_destination
 ```
 
 ### OpenDKIM variables
