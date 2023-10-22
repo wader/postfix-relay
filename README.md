@@ -66,12 +66,10 @@ volumes:
   - /path/to/passwd_file:/etc/postfix/sasl/sasl_passwds
 environment:
   - SASL_Passwds=/etc/postfix/sasl/sasl_passwds
-  - POSTFIX_cyrus_sasl_config_path=/etc/postfix/sasl
-  - POSTFIX_smtpd_sasl_local_domain=$myhostname
   - POSTFIX_smtpd_sasl_auth_enable=yes
-  - POSTFIX_broken_sasl_auth_clients=yes
+  - POSTFIX_cyrus_sasl_config_path=/etc/postfix/sasl
   - POSTFIX_smtpd_sasl_security_options=noanonymous
-  - POSTFIX_smtpd_recipient_restrictions=permit_sasl_authenticated,permit_mynetworks,reject_unauth_destination
+  - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
 ```
 
 ### OpenDKIM variables
