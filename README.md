@@ -170,6 +170,24 @@ mail._domainkey.smtp.domain.tld. IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
 	  "j5joTnYwat4387VEUyGUnZ0aZxCERi+ndXv2/wMJ0tizq+a9+EgqIb+7lkUc2XciQPNuTujM25GhrQBEKznvHyPA6fHsFheymOuB763QpkmnQQLCxyLygAY9mE/5RY+5Q6J9oDOQIDAQAB" )  ; ----- DKIM key mail for smtp.domain.tld
 ```
 
+## Testing
+
+This project uses [testcontainers](https://testcontainers.com/) with [pytest](https://docs.pytest.org/) for integration testing.
+
+[Mailpit](https://mailpit.axllent.org/) is also used to simulate a remote SMTP server.
+
+```bash
+# Create and enable python virtual environment
+python -m venv venv
+source venv/bin/activate
+# Install dependencies
+pip install -r tests/requirements.txt
+# Start tests
+pytest
+# Exit python virtual environment
+deactivate
+```
+
 ## License
 postfix-relay is licensed under the MIT license. See [LICENSE](LICENSE) for the
 full license text.
