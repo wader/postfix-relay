@@ -7,6 +7,15 @@ on:
   pull_request:
 
 jobs:
+  event_file:
+    name: "Event File"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: Event File
+        path: ${{ github.event_path }}
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -25,9 +34,10 @@ jobs:
       - name: Run tests
         run: pytest --junitxml=junit/test-results.xml
       
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2
+      - name: Upload Test Results
         if: (!cancelled())
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            junit/**/*.xml
+          name: Test Results
+          path: |
+            junit/*.xml
