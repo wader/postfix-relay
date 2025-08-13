@@ -20,7 +20,7 @@ def postfix(shared_network):
 
     container.start()
 
-    wait_for_logs(container, "Starting Postfix Mail Transport Agent: postfix", timeout=10)
+    wait_for_logs(container, "Starting", timeout=10)
 
     yield container
     container.stop()
