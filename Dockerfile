@@ -1,11 +1,6 @@
-# bump: debian-buster-slim /FROM debian:(.*)/ docker:debian|/^buster-.*-slim/|sort
-FROM debian:buster-20240612-slim
+# bump: debian-trixie-slim /FROM debian:(.*)/ docker:debian|/^trixie-.*-slim/|sort
+FROM debian:trixie-20250811-slim
 MAINTAINER Mattias Wadman mattias.wadman@gmail.com
-
-# Use archive sources for debian 10 (buster)
-RUN echo 'deb http://archive.debian.org/debian buster main contrib non-free' > /etc/apt/sources.list \
-    && echo 'deb http://archive.debian.org/debian-security buster/updates main contrib non-free' >> /etc/apt/sources.list \
-    && echo 'deb http://archive.debian.org/debian buster-backports main contrib non-free' >> /etc/apt/sources.list
 
 RUN \
   apt-get update && \
