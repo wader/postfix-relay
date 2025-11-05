@@ -1,5 +1,5 @@
 # bump: debian-trixie-slim /FROM debian:(.*)/ docker:debian|/^trixie-.*-slim/|sort
-FROM debian:trixie-20251020-slim
+FROM debian:trixie-20251103-slim
 MAINTAINER Mattias Wadman mattias.wadman@gmail.com
 
 RUN \
