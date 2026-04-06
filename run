@@ -3,8 +3,12 @@
 # DKIM config
 dkimConfig()
 {
-    postconf -e milter_default_action=accept
-    postconf -e smtpd_milters=inet:localhost:12301
+    if [ -z "$POSTFIX_milter_default_action" ] ; then
+      postconf -e milter_default_action=accept
+    fi
+    if [ -z "$POSTFIX_smtpd_milters" ] ; then
+      postconf -e smtpd_milters=inet:localhost:12301
+    fi
 
     rm -f /etc/opendkim/KeyTable
     rm -f /etc/opendkim/SigningTable
