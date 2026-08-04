@@ -1,64 +1,69 @@
-import dkim
-import re
-import smtplib
-import time
-import requests
+"""DKIM signing through OpenDKIM.
 
-from email.message import EmailMessage
+DKIM is the part of the image users have had the most trouble with, see
+issues #14, #63, #78 and #92.
+"""
 
-from tests.fixtures.dkim import DOMAIN, SELECTOR
+from tests.helpers import container_exec, container_log, postconf, restart, send
 
-def published_record(container):
-    # opendkim-genkey writes the record as a BIND fragment, split over quoted
-    # strings the way a zone file wants it. Put it back together as the DNS
-    # answer a verifier would get.
-    _, output = container.exec(f"cat /etc/opendkim/keys/{DOMAIN}/{SELECTOR}.txt")
+KEY_PATH = '/etc/opendkim/keys/example.com/sel1.private'
 
-    return "".join(re.findall(r'"([^"]*)"', output.decode())).encode()
 
-def relayed_message(mailpit, timeout=30):
-    api_url = f"{mailpit.get_base_api_url()}/api/v1"
-    deadline = time.monotonic() + timeout
+def test_mail_is_signed_for_configured_domains_only(postfix_factory, mailpit):
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1'})
 
-    while True:
-        messages = requests.get(f"{api_url}/messages").json()['messages']
-        if messages:
-            raw = requests.get(f"{api_url}/message/{messages[0]['ID']}/raw").content
-            # Line endings have to be what was signed for the body hash to
-            # match, whatever the store and the transport did with them.
-            return re.sub(rb'\r?\n', b'\r\n', raw)
-        if time.monotonic() > deadline:
-            raise AssertionError("no message was relayed")
-        time.sleep(0.5)
+    # Enabling DKIM wires postfix to opendkim by itself.
+    assert postconf(relay, 'smtpd_milters') == 'inet:localhost:12301'
+    assert postconf(relay, 'milter_default_action') == 'accept'
 
-def test_relayed_mail_is_signed(dkim_mailpit, signing_postfix):
-    msg = EmailMessage()
-    msg['Subject'] = 'Signed'
-    msg['From'] = f"sender@{DOMAIN}"
-    msg['To'] = 'receiver@example.org'
-    msg.set_content('Hello')
+    # The DNS record to publish is printed on start-up, it is the only place
+    # a user gets it from when the key is generated in an anonymous volume.
+    log = container_log(relay)
+    assert 'sel1._domainkey.example.com' in log
+    assert 'v=DKIM1' in log
 
-    with smtplib.SMTP(host=signing_postfix.get_container_host_ip(),
-                      port=signing_postfix.get_exposed_port(port=25)) as smtp:
-        smtp.send_message(msg)
+    send(relay, sender='sender@example.com', subject='signed')
+    send(relay, sender='sender@other.example', subject='not signed')
 
-    raw = relayed_message(dkim_mailpit)
-    signature = re.search(rb'^DKIM-Signature:(.*(?:\r\n[ \t].*)*)', raw, re.MULTILINE)
+    signature = mailpit.wait_for_message('signed')['headers']['dkim-signature'][0]
+    assert 'd=example.com' in signature
+    assert 's=sel1' in signature
 
-    assert signature, "message was relayed without a DKIM-Signature header"
-    assert f"d={DOMAIN}".encode() in signature.group(1)
-    assert f"s={SELECTOR}".encode() in signature.group(1)
+    # Only the domains in OPENDKIM_DOMAINS are in the signing table.
+    assert 'dkim-signature' not in mailpit.wait_for_message('not signed')['headers']
 
-    # And it verifies against the record the container told the operator to
-    # publish, which is the part that decides whether receivers accept it.
-    record = published_record(signing_postfix)
 
-    assert dkim.verify(raw, dnsfunc=lambda name, timeout=5: record)
+def test_keys_are_reused_after_a_restart(postfix_factory, mailpit):
+    """Restarting must not hand out a new key, the published DNS record
+    would stop matching and every signed mail would fail validation."""
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1'})
 
-def test_private_key_is_only_readable_by_opendkim(signing_postfix):
-    # OpenDKIM refuses keys other users can read, and says so in the log
-    # instead of signing.
-    _, output = signing_postfix.exec(
-        f"stat -c %U:%G:%a /etc/opendkim/keys/{DOMAIN}/{SELECTOR}.private")
+    key = container_exec(relay, ["md5sum", KEY_PATH]).split()[0]
 
-    assert output.decode().strip() == 'opendkim:opendkim:600'
+    restart(relay)
+
+    assert container_exec(relay, ["md5sum", KEY_PATH]).split()[0] == key
+    # The tables are rewritten from scratch instead of being appended to.
+    assert container_exec(relay, ["wc", "-l", "/etc/opendkim/KeyTable"]).split()[0] == '1'
+    # opendkim refuses to use a key other users could read.
+    assert container_exec(relay, ["stat", "-c", "%U %a", KEY_PATH]).strip() == 'opendkim 600'
+
+    send(relay, sender='sender@example.com', subject='signed after restart')
+
+    assert 'dkim-signature' in mailpit.wait_for_message('signed after restart')['headers']
+
+
+def test_milter_settings_are_left_alone_when_set_explicitly(postfix_factory):
+    """Enabling DKIM must not overwrite milter settings the user set.
+
+    Regression test for issue #134: the defaults are only there to save the
+    user from having to configure the milter themselves.
+    """
+    relay = postfix_factory(env={
+        'OPENDKIM_DOMAINS': 'example.com',
+        'POSTFIX_milter_default_action': 'tempfail',
+        'POSTFIX_smtpd_milters': 'inet:localhost:12301, inet:localhost:12302',
+    })
+
+    assert postconf(relay, 'milter_default_action') == 'tempfail'
+    assert postconf(relay, 'smtpd_milters') == 'inet:localhost:12301, inet:localhost:12302'

@@ -1,4 +1,4 @@
 pytest
+requests
 testcontainers
 testcontainers[mailpit]
-dkimpy

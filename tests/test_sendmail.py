@@ -1,19 +1,18 @@
 import os
-import time
-import requests
 
 from email.message import EmailMessage
 from email.utils import make_msgid
 from email.headerregistry import Address
 
+
 def test_sendmail(mailpit, smtp):
-    # Send email to postfix
+    # Send email to postfix
     msg = EmailMessage()
     msg['Subject'] = 'Hello world'
     msg['From'] = Address('Sender', 'sender', 'example.com')
     msg['To'] = (Address('Receiver 1', 'receiver_1', 'example.com'),
                  Address('Receiver 2', 'receiver_2', 'example.com'))
-    
+
     text = """
     Salut!
 
@@ -49,29 +48,56 @@ def test_sendmail(mailpit, smtp):
         msg.get_payload()[1].add_related(img.read(), 'image', 'png', cid=cid)
 
     smtp.send_message(msg)
-    
-    time.sleep(1)
 
-    # On mailpit check if the email exists
-    api_url = f"{mailpit.get_base_api_url()}/api/v1"
+    # On mailpit check if the email exists, then check its content.
+    message = mailpit.wait_for_message('Hello world')
 
-    response = requests.get(f"{api_url}/messages")
-    json = response.json()
-
-    assert json['total'] == 1
-
-    # Then check its content.
-    message_summary = json['messages'][0]
-
-    assert message_summary['From']['Address'] == 'sender@example.com'
-    assert message_summary['To'][0]['Address'] == 'receiver_1@example.com'
-    assert message_summary['To'][1]['Address'] == 'receiver_2@example.com'
-
-    response = requests.get(f"{api_url}/message/{message_summary['ID']}")
-    json = response.json()
+    assert message['From']['Address'] == 'sender@example.com'
+    assert message['To'][0]['Address'] == 'receiver_1@example.com'
+    assert message['To'][1]['Address'] == 'receiver_2@example.com'
 
     expected_text = text.replace('\n', '\r\n') + '\r\n'
     expected_html = html.replace('\n', '\r\n') + '\r\n'
 
-    assert json['Text'] == expected_text
-    assert json['HTML'] == expected_html
+    assert message['Text'] == expected_text
+    assert message['HTML'] == expected_html
+
+    assert len(message['Inline']) == 1
+    assert message['Inline'][0]['ContentType'] == 'image/png'
+
+
+def test_relayed_message_keeps_its_envelope(mailpit, smtp):
+    """The envelope, not the headers, decides where a relay sends mail.
+
+    A bcc recipient only exists in the envelope, so a message reaching one is
+    the proof that postfix relayed what it was given rather than what the
+    headers say.
+    """
+    msg = EmailMessage()
+    msg['Subject'] = 'Envelope'
+    msg['From'] = 'sender@example.com'
+    msg['To'] = 'visible@example.com'
+    msg.set_content('body')
+
+    smtp.sendmail('bounces@example.com',
+                  ['visible@example.com', 'hidden@example.com'],
+                  msg.as_string())
+
+    message = mailpit.wait_for_message('Envelope')
+
+    assert message['ReturnPath'] == 'bounces@example.com'
+    assert [to['Address'] for to in message['To']] == ['visible@example.com']
+    # Mailpit reports the envelope recipients that are in no header as bcc.
+    assert [bcc['Address'] for bcc in message['Bcc']] == ['hidden@example.com']
+
+
+def test_relay_adds_its_own_received_header(mailpit, smtp):
+    """Postfix identifies itself with myhostname in the trace headers."""
+    smtp.sendmail('sender@example.com', ['receiver@example.com'],
+                  'Subject: Received\r\n\r\nbody\r\n')
+
+    message = mailpit.wait_for_message('Received')
+
+    # "hostname" is the myhostname default from the Dockerfile.
+    assert any('by hostname (Postfix)' in received
+               for received in message['headers']['received'])
