@@ -1,5 +1,25 @@
 #!/bin/bash
 
+# "service ... start" returns as soon as start-stop-daemon has forked, so a
+# daemon that dies on its configuration does so after a successful start. Wait
+# for it to be there, rather than relaying mail without the signing or the
+# rewriting the container was asked for.
+startService()
+{
+    local name="$1" process="$2" try
+
+    service "$name" start
+    for try in 1 2 3 4 5 ; do
+      if pgrep -x "$process" > /dev/null ; then
+        return
+      fi
+      sleep 0.2
+    done
+
+    echo "$name did not start, refusing to relay without it." >&2
+    exit 1
+}
+
 # DKIM config
 dkimConfig()
 {
@@ -105,10 +125,10 @@ for e in ${!OPENDKIM_*} ; do
   echo "${e:9} ${!e}" >> /etc/opendkim.conf
 done
 
-trap "service postfix stop; service opendkim stop; service postsrsd stop; pkill -TERM rsyslogd; pkill -TERM saslauthd" SIGTERM SIGINT
+trap "stopping=1; service postfix stop; service opendkim stop; service postsrsd stop; pkill -TERM rsyslogd; pkill -TERM saslauthd" SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
-  service opendkim start
+  startService opendkim opendkim
 fi
 
 if [ ! -z "$POSTSRSD_SRS_DOMAIN" ] ; then
@@ -117,7 +137,7 @@ if [ ! -z "$POSTSRSD_SRS_DOMAIN" ] ; then
     exit 1
   fi
   srsConfig
-  service postsrsd start
+  startService postsrsd postsrsd
 fi
 
 # Checking for user specified passwd file
@@ -150,7 +170,7 @@ EOF
   saslauthd -c -r -a pam -m /var/spool/postfix/var/run/saslauthd &
 fi
 
-service postfix start
+startService postfix master
 
 # Don't fiddle with existing config file (e.g. mounted from filesystem)
 if [ -e /etc/rsyslog.conf ]; then
@@ -188,4 +208,13 @@ fi
 
 rsyslogd -n &
 wait
+
+# Reaching this without having been signalled means a daemon started here gave
+# up on its own. Exiting 0 would look like a clean stop and leave an
+# on-failure restart policy with nothing to act on.
+if [ -z "$stopping" ] ; then
+  echo "A daemon exited on its own, stopping the relay." >&2
+  exit 1
+fi
+
 exit 0

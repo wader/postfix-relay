@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# A relay that is up but no longer signing, rewriting or logging is worse than
+# one that is down: mail keeps leaving, unsigned or unlogged, and nothing says
+# so. The health check therefore covers every daemon "run" started, and looks
+# at postfix accepting connections rather than only at its master process.
+
+fail()
+{
+    echo "$1" >&2
+    exit 1
+}
+
+running()
+{
+    pgrep -x "$1" > /dev/null
+}
+
+# Listening sockets are read from the kernel: actually connecting every
+# interval would log a connect and a lost connection each time.
+listening()
+{
+    local hex proc=/proc/net/tcp
+
+    printf -v hex ':%04X' "$1"
+    if [ -r /proc/net/tcp6 ] ; then
+      proc="$proc /proc/net/tcp6"
+    fi
+
+    # State 0A is listening, and the local address column ends with the port.
+    awk -v port="$hex" '$4 == "0A" && index($2, port) { found = 1 }
+                        END { exit !found }' $proc
+}
+
+running master || fail "postfix master is not running"
+
+# Follow master.cf rather than assuming port 25, so a submission port added
+# with a POSTFIXMASTER_ variable is checked too and a service turned off with
+# maxproc 0 is not.
+for service in $(postconf -M | awk '$2 == "inet" && $7 != "0" { print $1 }') ; do
+  endpoint="${service##*:}"
+  port=$(getent services "$endpoint" | awk '{ sub("/.*", "", $2) ; print $2 }')
+  listening "${port:-$endpoint}" || fail "postfix is not listening on $service"
+done
+
+running rsyslogd || fail "rsyslogd is not running, mail is relayed unlogged"
+
+if [ -n "$OPENDKIM_DOMAINS" ] ; then
+  running opendkim || fail "opendkim is not running, mail is relayed unsigned"
+fi
+
+if [ -n "$POSTSRSD_SRS_DOMAIN" ] ; then
+  running postsrsd || fail "postsrsd is not running, envelope senders are not rewritten"
+fi
+
+if [ -n "$SASL_Passwds" ] ; then
+  running saslauthd || fail "saslauthd is not running, clients cannot authenticate"
+fi

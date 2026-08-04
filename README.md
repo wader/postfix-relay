@@ -198,6 +198,27 @@ environment:
 
 If configuration via environment variables is not flexible enough it's possible to configure rsyslog directly: `.conf` files in the `/etc/rsyslog.d` directory will be [sorted alphabetically](https://www.rsyslog.com/doc/v8-stable/rainerscript/include.html#file) and included into the primary configuration.
 
+### Health check
+
+The image ships a `HEALTHCHECK`, so `docker ps` reports whether the relay is
+actually able to work. It covers every daemon the container started, not only
+the postfix master, because a relay that has lost OpenDKIM keeps accepting mail
+and sends it unsigned:
+
+- postfix is running and listening on every `inet` service in `master.cf`, so a
+  submission port added with a `POSTFIXMASTER_` variable is checked too;
+- rsyslogd is running, otherwise mail is relayed without a trace;
+- OpenDKIM, PostSRSd and saslauthd are running when the environment asks for
+  them.
+
+Listening sockets are read from the kernel rather than connected to, so the
+check leaves nothing in the log.
+
+A daemon that fails to start at all stops the container instead of relaying
+mail without the signing or rewriting that was configured, and a daemon that
+later gives up on its own exits the container non-zero, so `restart:
+on-failure` brings it back.
+
 ### Timezone
 Wrong timestamps in log can be fixed by setting proper timezone.
 This parameter is handled by Debian base image.
