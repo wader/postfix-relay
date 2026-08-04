@@ -140,6 +140,14 @@ its default, and the bounce, 2bounce and delay recipients are only used if you
 widen it with `POSTFIX_notify_classes`. They are set anyway so that they are
 already correct if you do.
 
+Set `POSTFIX_myhostname` as well, or the notices may still be refused. They are
+sent *from*
+[double_bounce_sender](https://www.postfix.org/postconf.5.html#double_bounce_sender)
+qualified with `myorigin`, which derives from `myhostname` — so with the default
+they come from `double-bounce@hostname`, a domain that does not resolve, and a
+receiver that rejects unknown sender domains will turn them away however good
+the recipient address is.
+
 ### Using docker run
 ```
 docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
