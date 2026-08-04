@@ -2,6 +2,8 @@
 FROM debian:trixie-20260713-slim
 LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com>"
 
+# postsrsd is optional and only installed where Debian builds it: it is missing
+# for armhf in trixie, which is the linux/arm/v7 image.
 RUN \
   apt-get update && \
   apt-get -y --no-install-recommends install \
@@ -15,9 +17,13 @@ RUN \
     opendkim-tools \
     ca-certificates \
     rsyslog && \
+  if apt-cache show postsrsd > /dev/null 2>&1 ; then \
+    apt-get -y --no-install-recommends install postsrsd ; \
+  fi && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/* \
-    /etc/rsyslog.conf
+    /etc/rsyslog.conf \
+    /etc/postsrsd.secret
 # Default config:
 # Open relay, trust docker links for firewalling.
 # Try to use TLS when sending to other smtp servers.

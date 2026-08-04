@@ -78,6 +78,40 @@ OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can b
 using `OPENDKIM_<name>` environment variables. See [Dockerfile](Dockerfile) for default
 configuration. For example `OPENDKIM_Canonicalization=relaxed/simple`.
 
+### PostSRSd variables
+
+[SRS](https://en.wikipedia.org/wiki/Sender_Rewriting_Scheme) rewriting is off by
+default. Set `POSTSRSD_SRS_DOMAIN` to the domain envelope senders should be
+rewritten to, and the container starts [PostSRSd](https://github.com/roehling/postsrsd)
+and points postfix at it:
+
+```
+environment:
+  - POSTSRSD_SRS_DOMAIN=smtp.domain.tld
+```
+
+Any other setting from `/etc/default/postsrsd` can be set the same way, using
+`POSTSRSD_<name>` environment variables, for example
+`POSTSRSD_SRS_EXCLUDE_DOMAINS=.domain.tld,otherdomain.tld`.
+
+Only the envelope sender is rewritten (`sender_canonical_classes=envelope_sender`),
+so the visible `From:` header is left alone. If you set any of
+`POSTFIX_sender_canonical_maps`, `POSTFIX_sender_canonical_classes`,
+`POSTFIX_recipient_canonical_maps` or `POSTFIX_recipient_canonical_classes`
+yourself, your value is used instead.
+
+Rewritten addresses are signed with a secret in `/etc/postsrsd.secret`. The image
+ships without one, and a random secret is generated on first start, so no two
+deployments share a key. Return addresses stay valid for 21 days, so mount the
+file if you want them to survive recreating the container:
+
+```
+volumes:
+  - /your_local_path/postsrsd.secret:/etc/postsrsd.secret
+```
+
+Note that Debian does not build postsrsd for armhf in trixie, so SRS is unavailable on the `arm/v7` image. Setting `POSTSRSD_SRS_DOMAIN` there stops the container with an explicit error rather than relaying without the rewriting you asked for.
+
 ### Using docker run
 ```
 docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
