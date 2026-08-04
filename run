@@ -214,14 +214,16 @@ $ModLoad imuxsock
 $WorkDirectory /var/spool/rsyslog
 
 include(file="/etc/rsyslog.d/*.conf")
-
-*.*;auth,authpriv.none /dev/stdout
 EOF
 
+  # $ActionFileDefaultTemplate only applies to the actions written after it,
+  # so it has to come before the ones below.
   if [ "${RSYSLOG_TIMESTAMP}" == 'no' ] ; then
     echo '$template noTimestampFormat,"%syslogtag%%msg%\n"' >> /etc/rsyslog.conf
     echo '$ActionFileDefaultTemplate noTimestampFormat' >> /etc/rsyslog.conf
   fi
+
+  echo '*.*;auth,authpriv.none /dev/stdout' >> /etc/rsyslog.conf
 
   if [ "${RSYSLOG_LOG_TO_FILE}" == 'yes' ] ; then
     echo 'mail.* -/var/log/mail.log' >> /etc/rsyslog.conf
