@@ -88,6 +88,20 @@ rm -f \
   /run/rsyslogd.pid \
   /var/spool/postfix/pid/master.pid
 
+# POSTMASTER_ADDRESS env -> route postfix's own notifications (notify_classes)
+# to a mailbox someone reads. They are addressed to the unqualified
+# "postmaster", which append_at_myorigin turns into postmaster@$myorigin, the
+# relay's own name. A relay accepts no mail for itself, so the notices are
+# deferred until they time out and are then dropped. Set before the POSTFIX_
+# loop below so that an explicit POSTFIX_<class>_notice_recipient overrides it.
+# notify_classes is left alone: setting bounce/2bounce/delay recipients is
+# inert until someone widens it, it just means they are already correct then.
+if [ ! -z "$POSTMASTER_ADDRESS" ] ; then
+  for c in error bounce 2bounce delay ; do
+    postconf -e "${c}_notice_recipient=$POSTMASTER_ADDRESS"
+  done
+fi
+
 # POSTFIX_var env -> postconf -e var=$POSTFIX_var
 for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 # POSTFIXMASTER_var env -> postconf -Me var=$POSTFIXMASTER_var + replace __ with /
