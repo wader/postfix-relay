@@ -1,6 +1,6 @@
 # bump: debian-trixie-slim /FROM debian:(.*)/ docker:debian|/^trixie-.*-slim/|sort
 FROM debian:trixie-20260713-slim
-MAINTAINER Mattias Wadman mattias.wadman@gmail.com
+LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com>"
 
 RUN \
   apt-get update && \
