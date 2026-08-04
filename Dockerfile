@@ -47,7 +47,7 @@ ENV \
   SASL_Passwds=""
 RUN mkdir -p /etc/opendkim/keys
 COPY run /root/
-VOLUME ["/var/lib/postfix", "/var/mail", "/var/spool/postfix", "/etc/opendkim/keys"]
+VOLUME ["/var/spool/postfix", "/etc/opendkim/keys"]
 EXPOSE 25
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD pgrep -x master

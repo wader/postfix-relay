@@ -130,6 +130,39 @@ smtp:
     - OPENDKIM_DOMAINS=smtp.domain.tld
 ```
 
+### Volumes
+The image declares volumes for the two directories holding state that cannot be
+recreated:
+
+- `/var/spool/postfix` — the postfix queue. Mail that has been accepted but not
+  yet delivered lives here, so replacing a container while messages are queued
+  loses them unless the queue is persisted.
+- `/etc/opendkim/keys` — the DKIM private keys. If they are lost, new keys are
+  generated at the next start and the DNS records you published no longer match
+  (see [DKIM](#dkim)).
+
+Everything else postfix writes is regenerated at start-up and is deliberately
+not declared. `/var/lib/postfix` only holds a lock file and the TLS PRNG seed,
+and `/var/mail` only receives mail addressed to a local user, which is not what
+a relay is for.
+
+Note that declaring a volume is not by itself enough to preserve anything.
+Without an explicit mount docker creates an *anonymous* volume: `docker compose
+up` carries it over when it recreates a container, but a plain `docker rm` and
+`docker run` replaces it with an empty one. To keep the queue and the keys
+across container replacement, mount them yourself:
+
+```
+volumes:
+  - /your_local_path/spool:/var/spool/postfix
+  - /your_local_path/dkim-keys:/etc/opendkim/keys
+```
+
+Do not point two running containers at the same queue directory. Postfix's
+singleton lock lives in `/var/lib/postfix` rather than in the queue, so nothing
+prevents two masters from working on one queue and duplicating or corrupting
+mail.
+
 ### Logging
 By default container only logs to stdout. If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
 
