@@ -8,6 +8,12 @@ on:
       - '*'
   pull_request:
 
+# A new push makes the images an in-flight run would produce obsolete, except
+# on master where the run publishes latest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -62,8 +68,10 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
           push: true
-          tags: mwader/postfix-relay:latest
+          tags: ${{ steps.reponame.outputs.DOCKER_REPO }}:latest
           labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       -
         name: Build and push branch or test PR
         if: github.ref != 'refs/heads/master'
@@ -75,3 +83,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
