@@ -20,6 +20,41 @@ startService()
     exit 1
 }
 
+# <name>_FILE env -> read <name> from the file it points at
+#
+# Relaying usually means holding a credential for the upstream server, and the
+# environment is a poor place to keep one: it shows up in "docker inspect", in
+# the compose file and in /proc for every process in the container. Reading the
+# value from a file instead allows using docker secrets or a mounted file.
+secretsFromFiles()
+{
+    local file var
+    for file in ${!POSTFIX_*} ${!POSTFIXMASTER_*} ${!POSTMAP_*} ${!OPENDKIM_*} ${!POSTSRSD_*} ; do
+      var="${file%_FILE}"
+      if [ "$var" == "$file" ] ; then
+        continue
+      fi
+
+      # The image ships defaults for several of these variables, POSTFIX_myhostname
+      # and the OPENDKIM_ ones among them, so finding one already set is normal
+      # rather than a mistake. The file is what was asked for last, and wins.
+      if [ -n "${!var+set}" ] ; then
+        echo "$var is also set: using the value from $file."
+      fi
+      if [ ! -r "${!file}" ] ; then
+        echo "$file points at '${!file}', which cannot be read." >&2
+        exit 1
+      fi
+
+      # $(< file) drops trailing newlines, which a secret file is likely to
+      # end with and a password is unlikely to contain.
+      printf -v "$var" '%s' "$(< "${!file}")"
+      export "${var?}"
+      # Unset so that the loops below don't also configure "<name>_FILE".
+      unset "$file"
+    done
+}
+
 # DKIM config
 dkimConfig()
 {
@@ -108,6 +143,8 @@ rm -f \
   /run/rsyslogd.pid \
   /var/spool/postfix/pid/master.pid
 
+secretsFromFiles
+
 # POSTMASTER_ADDRESS env -> route postfix's own notifications (notify_classes)
 # to a mailbox someone reads. They are addressed to the unqualified
 # "postmaster", which append_at_myorigin turns into postmaster@$myorigin, the
@@ -127,7 +164,17 @@ for e in ${!POSTFIX_*} ; do postconf -e "${e:8}=${!e}" ; done
 # POSTFIXMASTER_var env -> postconf -Me var=$POSTFIXMASTER_var + replace __ with /
 for e in ${!POSTFIXMASTER_*} ; do v="${e:14}" && postconf -Me "${v//__/\/}=${!e}"; done
 # POSTMAP_var env value -> /etc/postfix/var
-for e in ${!POSTMAP_*} ; do echo "${!e}" > "/etc/postfix/${e:8}" && postmap "/etc/postfix/${e:8}"; done
+shopt -s nullglob
+for e in ${!POSTMAP_*} ; do
+  f="/etc/postfix/${e:8}"
+  echo "${!e}" > "$f" && postmap "$f"
+  # A lookup table is a likely place for a password (smtp_sasl_password_maps),
+  # so keep the table and the database postmap generated from it readable by
+  # postfix only instead of by everyone in the container.
+  chown root:postfix "$f" "$f".*
+  chmod u=rw,g=r,o= "$f" "$f".*
+done
+shopt -u nullglob
 
 chown -R postfix:postfix /var/lib/postfix /var/spool/postfix
 
