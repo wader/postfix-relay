@@ -46,9 +46,9 @@ ENV \
   RSYSLOG_LOG_TO_FILE=no \
   SASL_Passwds=""
 RUN mkdir -p /etc/opendkim/keys
-COPY run /root/
+COPY run healthcheck /root/
 VOLUME ["/var/spool/postfix", "/etc/opendkim/keys"]
 EXPOSE 25
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD pgrep -x master
+  CMD ["/root/healthcheck"]
 CMD ["/root/run"]
