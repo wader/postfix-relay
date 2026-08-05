@@ -1,8 +1,15 @@
 import pytest
-import smtplib
 
-@pytest.fixture(scope="session")
+from tests.helpers import smtp_connect
+
+
+@pytest.fixture
 def smtp(postfix):
-    smtp = smtplib.SMTP(host=postfix.get_container_host_ip(), port=postfix.get_exposed_port(port=25))
+    """Client connected to the relay shared by the tests.
+
+    Function scoped: a test that leaves the connection in a broken state,
+    which the ones about rejected mail do, must not affect the next one.
+    """
+    smtp = smtp_connect(postfix)
     yield smtp
     smtp.close()

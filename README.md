@@ -366,9 +366,40 @@ source venv/bin/activate
 pip install -r tests/requirements.txt
 # Start tests
 pytest
+# Or a single file
+pytest tests/test_dkim.py
 # Exit python virtual environment
 deactivate
 ```
+
+The tests build the image and run it, so what they check is the image
+itself: mail is sent to a container and what comes out of it is read back
+from mailpit. Each `tests/test_*.py` file covers one area, relaying, the
+defaults, configuration variables, DKIM, SASL, SRS, logging and the
+container lifecycle, `tests/fixtures` has the containers and
+`tests/helpers.py` the few things tests keep doing, like waiting for a mail
+or reading back a postfix setting.
+
+Use the `postfix` fixture for a relay with the default configuration, and
+`postfix_factory` when a test needs its own:
+
+```python
+def test_signing(postfix_factory, mailpit):
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com'})
+
+    send(relay, sender='sender@example.com', subject='signed')
+
+    assert 'dkim-signature' in mailpit.wait_for_message('signed')['headers']
+```
+
+`postfix_factory` also takes `files` for the configuration that is mounted
+rather than set through the environment, and `volumes` for the state the
+image keeps across containers. Every call starts a container, which is most
+of what the suite costs, so a test that only needs the defaults should use
+the shared `postfix` fixture instead.
+
+When a test fails, the log of the containers it used is part of the pytest
+output.
 
 ## License
 postfix-relay is licensed under the MIT license. See [LICENSE](LICENSE) for the
