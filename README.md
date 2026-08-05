@@ -15,7 +15,14 @@ using `POSTFIX_<name>` environment variables. See [Dockerfile](Dockerfile) for d
 configuration. You probably want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO).
 
 Note that `POSTFIX_myhostname` will change the postfix option
-[myhostname](http://www.postfix.org/postconf.5.html#myhostname).
+[myhostname](http://www.postfix.org/postconf.5.html#myhostname). The image ships
+`POSTFIX_myhostname=hostname`, so unless you set it yourself a running container
+ends up with the literal string `hostname` rather than the qualified name
+postfix would otherwise derive from `gethostname()`. Set it to the FQDN clients
+and remote servers should see: it is used for the 220 greeting and HELO, and
+[myorigin](http://www.postfix.org/postconf.5.html#myorigin) derives from it, so
+it also affects `Received` headers and the envelope sender of mail postfix
+generates itself.
 
 You can modify master.cf using postconf with `POSTFIXMASTER_` variables. All double `__` symbols will be replaced with `/`. For example
 
