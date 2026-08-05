@@ -4,9 +4,22 @@ DKIM is the part of the image users have had the most trouble with, see
 issues #14, #63, #78 and #92.
 """
 
-from tests.helpers import container_exec, container_log, postconf, restart, send
+import dkim
+
+from tests.helpers import (container_exec, container_log, dkim_dns_record, postconf,
+                           restart, send)
 
 KEY_PATH = '/etc/opendkim/keys/example.com/sel1.private'
+
+
+def verifies(raw, record):
+    """Whether a signed message validates against the record it points at.
+
+    The public key is handed to the verifier directly instead of being looked
+    up: there is no DNS in the test network, and what has to be checked is that
+    the signature matches the record the container tells the user to publish.
+    """
+    return dkim.verify(raw, dnsfunc=lambda name, **kwargs: record.encode())
 
 
 def test_mail_is_signed_for_configured_domains_only(postfix_factory, mailpit):
@@ -51,6 +64,84 @@ def test_keys_are_reused_after_a_restart(postfix_factory, mailpit):
     send(relay, sender='sender@example.com', subject='signed after restart')
 
     assert 'dkim-signature' in mailpit.wait_for_message('signed after restart')['headers']
+
+
+def test_the_signature_verifies_against_the_published_key(postfix_factory, mailpit):
+    """A signature header being present is not the same as it being valid.
+
+    Nothing else in the suite would notice a key, a selector or a
+    canonicalization that produces a signature every receiver rejects.
+    """
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1'})
+
+    send(relay, sender='sender@example.com', subject='verify me', body='signed body')
+
+    raw = mailpit.raw(mailpit.wait_for_message('verify me')['ID'])
+    record = dkim_dns_record(relay, 'example.com', 'sel1')
+
+    assert verifies(raw, record)
+    # And it signs this message rather than always validating.
+    assert not verifies(raw.replace(b'signed body', b'tampered!!!'), record)
+
+
+def test_every_domain_gets_a_key_and_the_default_selector_is_mail(postfix_factory, mailpit):
+    """OPENDKIM_DOMAINS is a whitespace-separated list, "=<selector>" optional."""
+    relay = postfix_factory(env={
+        'OPENDKIM_DOMAINS': 'first.example second.example=sel2',
+        'OPENDKIM_Canonicalization': 'relaxed/relaxed',
+        'OPENDKIM_RequireSafeKeys': 'no',
+    })
+
+    assert container_exec(relay, ["ls", "/etc/opendkim/keys/first.example"]).split() == \
+        ['mail.private', 'mail.txt']
+    assert container_exec(relay, ["ls", "/etc/opendkim/keys/second.example"]).split() == \
+        ['sel2.private', 'sel2.txt']
+    # opendkim refuses a key directory other users could write.
+    assert container_exec(
+        relay, ["stat", "-c", "%U:%G", "/etc/opendkim/keys/first.example"]
+    ).strip() == 'opendkim:opendkim'
+
+    # Every other OPENDKIM_<name> is an opendkim.conf setting, including the
+    # RequireSafeKeys workaround the README documents...
+    conf = container_exec(relay, ["cat", "/etc/opendkim.conf"])
+    assert 'Canonicalization relaxed/relaxed' in conf
+    assert 'RequireSafeKeys no' in conf
+    # ...but the domain list itself is not one of them.
+    assert 'DOMAINS' not in conf
+
+    send(relay, sender='sender@first.example', subject='first domain')
+    send(relay, sender='sender@second.example', subject='second domain')
+
+    assert 's=mail' in mailpit.wait_for_message('first domain')['headers']['dkim-signature'][0]
+    assert 's=sel2' in mailpit.wait_for_message('second domain')['headers']['dkim-signature'][0]
+
+
+def test_keys_survive_recreating_the_container(docker_volume, postfix_factory, mailpit):
+    """Mounting a volume on /etc/opendkim/keys keeps the published record valid.
+
+    Restarting a container is not the case users are told about: the README
+    warns the keys are destroyed with the container unless a volume is mounted,
+    which is a different code path from a restart.
+    """
+    env = {'OPENDKIM_DOMAINS': 'example.com=sel1'}
+    volumes = {docker_volume: '/etc/opendkim/keys'}
+
+    first = postfix_factory(env=env, volumes=volumes)
+    key = container_exec(first, ["md5sum", KEY_PATH]).split()[0]
+    record = dkim_dns_record(first, 'example.com', 'sel1')
+    first.get_wrapped_container().stop()
+
+    second = postfix_factory(env=env, volumes=volumes)
+
+    assert container_exec(second, ["md5sum", KEY_PATH]).split()[0] == key
+    assert 'Generating one now' not in container_log(second)
+
+    send(second, sender='sender@example.com', subject='signed by the kept key',
+         body='signed body')
+
+    raw = mailpit.raw(mailpit.wait_for_message('signed by the kept key')['ID'])
+
+    assert verifies(raw, record)
 
 
 def test_milter_settings_are_left_alone_when_set_explicitly(postfix_factory):

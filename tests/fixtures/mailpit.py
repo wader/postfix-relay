@@ -34,6 +34,22 @@ class Mailpit:
         response.raise_for_status()
         return response.json()
 
+    def raw(self, message_id):
+        """The message exactly as it arrived, bytes included.
+
+        Anything that has to be checked byte for byte, a DKIM signature for
+        instance, has to be read from here rather than from the parsed JSON.
+        """
+        response = requests.get(f"{self.api_url}/message/{message_id}/raw")
+        response.raise_for_status()
+        return response.content
+
+    def part(self, message_id, part_id):
+        """One MIME part of a message, as bytes."""
+        response = requests.get(f"{self.api_url}/message/{message_id}/part/{part_id}")
+        response.raise_for_status()
+        return response.content
+
     def headers(self, message_id):
         """Headers of a message, keyed by lower case name."""
         response = requests.get(f"{self.api_url}/message/{message_id}/headers")

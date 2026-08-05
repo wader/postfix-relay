@@ -29,6 +29,29 @@ def test_envelope_sender_is_rewritten(srs_relay, mailpit):
     # Only the envelope is rewritten, the visible From stays untouched.
     assert message['From']['Address'] == 'sender@example.com'
 
+    # And the rewriting is reversible, otherwise a bounce sent back to that
+    # address would have nowhere to go.
+    assert container_exec(srs_relay, [
+        "postmap", "-q", message['ReturnPath'], "tcp:127.0.0.1:10002"
+    ]).strip() == 'sender@example.com'
+
+
+def test_each_deployment_generates_its_own_secret(postfix_factory):
+    """The image ships without a secret, deliberately.
+
+    Two deployments sharing one could forge each other's return addresses, so
+    the packaged /etc/postsrsd.secret is removed when the image is built.
+    """
+    first = postfix_factory(env={'POSTSRSD_SRS_DOMAIN': SRS_DOMAIN})
+    second = postfix_factory(env={'POSTSRSD_SRS_DOMAIN': SRS_DOMAIN})
+
+    secret = container_exec(first, ["cat", "/etc/postsrsd.secret"])
+
+    assert secret.strip()
+    assert container_exec(second, ["cat", "/etc/postsrsd.secret"]) != secret
+    # And it is not handed to whoever can read the container log.
+    assert secret.strip() not in first.get_logs()[0].decode()
+
 
 def test_excluded_domains_are_not_rewritten(postfix_factory, mailpit):
     relay = postfix_factory(env={
@@ -75,6 +98,27 @@ def test_a_mounted_secret_is_kept(postfix_factory):
 
     assert container_exec(relay, ["cat", "/etc/postsrsd.secret"]) == secret
     assert 'No SRS secret found' not in relay.get_logs()[0].decode()
+    # Tightened on every start, a mounted one included: it signs the return
+    # addresses and anyone who can read it can forge them.
+    assert container_exec(relay, ["stat", "-c", "%a", "/etc/postsrsd.secret"]).strip() == '600'
+
+
+def test_the_postsrsd_ports_can_be_changed(postfix_factory, mailpit):
+    """Both ends move together: the postfix maps follow the postsrsd ports."""
+    relay = postfix_factory(env={
+        'POSTSRSD_SRS_DOMAIN': SRS_DOMAIN,
+        'POSTSRSD_SRS_FORWARD_PORT': '11001',
+        'POSTSRSD_SRS_REVERSE_PORT': '11002',
+    })
+
+    assert postconf(relay, 'sender_canonical_maps') == 'tcp:127.0.0.1:11001'
+    assert postconf(relay, 'recipient_canonical_maps') == 'tcp:127.0.0.1:11002'
+
+    send(relay, sender='sender@example.com', subject='rewritten on another port')
+
+    message = mailpit.wait_for_message('rewritten on another port')
+
+    assert message['ReturnPath'].startswith('SRS0=')
 
 
 def test_user_supplied_canonical_maps_are_kept(postfix_factory):

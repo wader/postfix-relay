@@ -1,3 +1,4 @@
+import re
 import smtplib
 import time
 
@@ -62,6 +63,40 @@ def container_exec(container, command):
 def postconf(container, name):
     """Read an effective postfix setting, as postfix itself sees it."""
     return container_exec(container, ["postconf", "-h", name]).strip()
+
+
+def process_running(container, name):
+    """Whether a process is running in the container.
+
+    Used to check that a daemon the user did not ask for was left alone: the
+    image starts opendkim, postsrsd and saslauthd only when configured to.
+    """
+    return container.exec(["pgrep", "-x", name]).exit_code == 0
+
+
+def esmtp_features(container, port=25):
+    """The relay's greeting and what it advertises in its EHLO response.
+
+    Connected in two steps rather than with smtp_connect: the 220 greeting is
+    only returned by connect(), and it carries myhostname.
+    """
+    smtp = smtplib.SMTP(timeout=DEFAULT_TIMEOUT)
+    code, banner = smtp.connect(container.get_container_host_ip(),
+                                container.get_exposed_port(port))
+    smtp.ehlo()
+    features = dict(smtp.esmtp_features)
+    smtp.quit()
+    return code, banner.decode(), features
+
+
+def dkim_dns_record(container, domain, selector):
+    """The TXT record opendkim generated for a domain, as DNS would serve it.
+
+    The generated .txt file splits the record over several quoted strings,
+    which is what BIND wants; a resolver hands a verifier the concatenation.
+    """
+    text = container_exec(container, ["cat", f"/etc/opendkim/keys/{domain}/{selector}.txt"])
+    return "".join(re.findall(r'"([^"]*)"', text))
 
 
 def container_log(container):

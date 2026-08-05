@@ -4,7 +4,9 @@ A relay is a long running container that gets restarted, updated and left
 waiting for a server that is down, and has to keep the mail it accepted.
 """
 
-from tests.helpers import (container_exec, poll_until, restart, send,
+import time
+
+from tests.helpers import (container_exec, poll_until, process_running, restart, send,
                            wait_for_file, wait_for_log, wait_for_smtp)
 
 
@@ -41,6 +43,49 @@ def test_relaying_still_works_after_an_unclean_stop(postfix_factory, mailpit):
     assert mailpit.wait_for_message('after the kill')
 
 
+def test_the_container_stops_gracefully(postfix_factory):
+    """"docker stop" must not have to fall back to killing the container.
+
+    The trap in "run" stops the services and lets the script return, so a stop
+    takes a moment instead of the ten seconds docker waits before SIGKILL, and
+    mail being handed over is not cut off half way.
+    """
+    relay = postfix_factory()
+    wrapped = relay.get_wrapped_container()
+
+    started = time.monotonic()
+    wrapped.stop(timeout=30)
+    elapsed = time.monotonic() - started
+
+    wrapped.reload()
+    assert wrapped.attrs['State']['ExitCode'] == 0
+    assert elapsed < 10, f"stopping took {elapsed:.1f}s, the SIGTERM trap did not run"
+
+
+def test_dkim_and_srs_come_back_after_an_unclean_stop(postfix_factory, mailpit):
+    """The pid files opendkim and postsrsd leave behind are cleaned up too.
+
+    Issue #22 was about postfix and rsyslogd, but a container killed with DKIM
+    or SRS enabled has the same problem, and a relay that comes back up without
+    them silently sends unsigned and unrewritten mail.
+    """
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1',
+                                 'POSTSRSD_SRS_DOMAIN': 'srs.example.com'})
+
+    relay.get_wrapped_container().kill()
+    relay.get_wrapped_container().start()
+    wait_for_smtp(relay)
+
+    assert process_running(relay, 'opendkim')
+    assert process_running(relay, 'postsrsd')
+
+    send(relay, sender='sender@example.com', subject='signed and rewritten again')
+
+    message = mailpit.wait_for_message('signed and rewritten again')
+    assert 'dkim-signature' in message['headers']
+    assert message['ReturnPath'].startswith('SRS0=')
+
+
 def test_local_mailboxes_are_not_taken_over(postfix_factory):
     """Mail for a local user is delivered and keeps its owner.
 
@@ -75,6 +120,11 @@ def test_mail_waits_in_the_queue_until_the_relayhost_answers(postfix_factory,
     queue = container_exec(relay, ["postqueue", "-p"])
     assert 'receiver@example.com' in queue
     assert 'Host or domain name not found' in queue
+
+    # And a restart does not lose it: /var/spool/postfix is a volume for
+    # exactly this, mail that was accepted has to be delivered eventually.
+    restart(relay)
+    assert 'receiver@example.com' in container_exec(relay, ["postqueue", "-p"])
 
     late = mailpit_factory('late-mailpit')
     container_exec(relay, ["postqueue", "-f"])

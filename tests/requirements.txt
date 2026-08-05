@@ -1,3 +1,4 @@
+dkimpy
 pytest
 requests
 testcontainers

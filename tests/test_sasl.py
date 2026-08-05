@@ -12,7 +12,7 @@ import pytest
 
 from testcontainers.community.mailpit import MailpitUser
 
-from tests.helpers import send, smtp_connect, wait_for_log
+from tests.helpers import container_exec, restart, send, smtp_connect, wait_for_log
 
 PASSWD_FILE = '/etc/postfix/sasl/sasl_passwds'
 USER, PASSWORD = 'myuser', 'mypassword'
@@ -75,6 +75,65 @@ def test_clients_without_valid_credentials_may_not_relay(authenticated_relay, ma
     assert refused.value.smtp_code == 535
 
     mailpit.assert_nothing_delivered()
+
+
+def test_authentication_still_works_after_a_restart(authenticated_relay, mailpit):
+    """The second start must not leave the relay unable to authenticate anyone.
+
+    Setting SASL up is not idempotent on the face of it: the statoverride is
+    already registered and postfix is already in the sasl group, and neither
+    failing stops the rest of the script.
+    """
+    restart(authenticated_relay)
+
+    with smtp_connect(authenticated_relay) as smtp:
+        smtp.ehlo()
+        smtp.user, smtp.password = USER, PASSWORD
+        code, _ = smtp.auth('PLAIN', smtp.auth_plain)
+        assert code == 235
+
+        smtp.sendmail('sender@example.com', ['receiver@example.com'],
+                      'Subject: authenticated after restart\r\n\r\nbody\r\n')
+
+    assert mailpit.wait_for_message('authenticated after restart')
+
+
+def test_mounted_sasl_configuration_is_not_overwritten(postfix_image, postfix_factory):
+    """A user can bring their own SASL and PAM configuration instead.
+
+    Both files are only written when they do not exist, which is what makes
+    mechanisms other than the built-in PAM setup possible.
+    """
+    smtpd_conf = 'pwcheck_method: saslauthd\nmech_list: PLAIN\n'
+    pam = ('auth            required        pam_pwdfile.so pwdfile=%s\n'
+           'account         required        pam_permit.so\n') % PASSWD_FILE
+
+    relay = postfix_factory(
+        env={
+            'SASL_Passwds': PASSWD_FILE,
+            'POSTFIX_smtpd_sasl_auth_enable': 'yes',
+            'POSTFIX_cyrus_sasl_config_path': '/etc/postfix/sasl',
+            'POSTFIX_smtpd_sasl_security_options': 'noanonymous',
+        },
+        files={
+            PASSWD_FILE: f"{USER}:{mkpasswd(postfix_image, PASSWORD)}\n",
+            '/etc/postfix/sasl/smtpd.conf': smtpd_conf,
+            '/etc/pam.d/smtp': pam,
+        },
+    )
+
+    assert container_exec(relay, ["cat", "/etc/postfix/sasl/smtpd.conf"]) == smtpd_conf
+    assert container_exec(relay, ["cat", "/etc/pam.d/smtp"]) == pam
+
+    with smtp_connect(relay) as smtp:
+        smtp.ehlo()
+        # The generated file would have offered CRAM-MD5, DIGEST-MD5 and LOGIN
+        # as well, so the mounted mech_list is the one in use.
+        assert smtp.esmtp_features['auth'].split() == ['PLAIN']
+
+        smtp.user, smtp.password = USER, PASSWORD
+        code, _ = smtp.auth('PLAIN', smtp.auth_plain)
+        assert code == 235
 
 
 def test_relaying_through_an_authenticated_upstream(postfix_factory, mailpit_factory):

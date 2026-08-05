@@ -9,7 +9,7 @@ import smtplib
 
 import pytest
 
-from tests.helpers import container_exec, postconf, send, smtp_connect
+from tests.helpers import container_exec, esmtp_features, postconf, send, smtp_connect
 
 
 def test_postfix_variables_configure_main_cf(postfix_factory, mailpit):
@@ -30,6 +30,26 @@ def test_postfix_variables_configure_main_cf(postfix_factory, mailpit):
 
     send(relay, subject='small enough')
     assert mailpit.wait_for_message('small enough')
+
+
+def test_myhostname_is_what_the_relay_calls_itself(postfix_factory, mailpit):
+    """The one setting the README tells every user to set."""
+    relay = postfix_factory(env={
+        'POSTFIX_myhostname': 'smtp.example.test',
+        # An empty value clears a Dockerfile default instead of being skipped,
+        # which is the only way to turn one of them off.
+        'POSTFIX_smtp_tls_security_level': '',
+    })
+
+    code, banner, _ = esmtp_features(relay)
+    assert code == 220
+    assert banner.startswith('smtp.example.test ESMTP')
+    assert postconf(relay, 'smtp_tls_security_level') == ''
+
+    send(relay, subject='named relay')
+
+    assert any('by smtp.example.test (Postfix)' in received
+               for received in mailpit.wait_for_message('named relay')['headers']['received'])
 
 
 def test_postfixmaster_variables_configure_master_cf(postfix_factory, mailpit):

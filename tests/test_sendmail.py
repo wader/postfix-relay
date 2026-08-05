@@ -65,6 +65,11 @@ def test_sendmail(mailpit, smtp):
     assert len(message['Inline']) == 1
     assert message['Inline'][0]['ContentType'] == 'image/png'
 
+    # And the image is the one that was sent, byte for byte: a relay that
+    # re-encoded or truncated the part would still pass everything above.
+    with open(os.path.join(os.path.dirname(__file__), 'img/postfix-logo.png'), 'rb') as img:
+        assert mailpit.part(message['ID'], message['Inline'][0]['PartID']) == img.read()
+
 
 def test_relayed_message_keeps_its_envelope(mailpit, smtp):
     """The envelope, not the headers, decides where a relay sends mail.
@@ -89,6 +94,48 @@ def test_relayed_message_keeps_its_envelope(mailpit, smtp):
     assert [to['Address'] for to in message['To']] == ['visible@example.com']
     # Mailpit reports the envelope recipients that are in no header as bcc.
     assert [bcc['Address'] for bcc in message['Bcc']] == ['hidden@example.com']
+
+
+def test_a_bounce_may_be_relayed(mailpit, smtp):
+    """A null envelope sender is what every bounce carries.
+
+    Refusing it would mean the relay cannot pass on delivery reports, which
+    postfix itself generates.
+    """
+    smtp.sendmail('', ['receiver@example.com'],
+                  'Subject: null sender\r\nFrom: MAILER-DAEMON\r\n\r\nbody\r\n')
+
+    assert mailpit.wait_for_message('null sender')['ReturnPath'] == ''
+
+
+def test_an_unknown_local_recipient_is_refused(smtp):
+    """mydestination is localhost, so localhost mail is delivered, not relayed.
+
+    A relay that accepted it would have to bounce it afterwards, which is how
+    a relay ends up sending backscatter.
+    """
+    smtp.ehlo()
+    assert smtp.docmd('MAIL', 'FROM:<sender@example.com>')[0] == 250
+
+    code, message = smtp.docmd('RCPT', 'TO:<nosuchuser@localhost>')
+
+    assert code == 550
+    assert b'User unknown' in message
+
+
+def test_accented_text_survives_the_relay(mailpit, smtp):
+    """The relay advertises 8BITMIME and SMTPUTF8, so nothing may be mangled."""
+    msg = EmailMessage()
+    msg['Subject'] = 'Réunion à 15 h'
+    msg['From'] = 'sender@example.com'
+    msg['To'] = 'receiver@example.com'
+    msg.set_content('Déjà vu — çà et là.\n')
+
+    smtp.send_message(msg)
+
+    message = mailpit.wait_for_message('Réunion à 15 h')
+
+    assert 'Déjà vu — çà et là.' in message['Text']
 
 
 def test_relay_adds_its_own_received_header(mailpit, smtp):

@@ -1,12 +1,14 @@
 import itertools
 import os
+
+import docker
 import pytest
 
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.image import DockerImage
 
 from tests.conftest import print_log_on_failure
-from tests.helpers import wait_for_smtp
+from tests.helpers import poll_until, wait_for_smtp
 
 ROOT_PATH = os.path.dirname(__file__) + '/../../'
 
@@ -24,7 +26,8 @@ def postfix_image():
     return str(image)
 
 
-def _start(image, network, env=None, files=None, ports=(25,), alias=None, wait_ready=True):
+def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
+           wait_ready=True):
     container = DockerContainer(image=image) \
         .with_network(network) \
         .with_network_aliases(alias or f"postfix-{next(_alias_numbers)}") \
@@ -32,6 +35,8 @@ def _start(image, network, env=None, files=None, ports=(25,), alias=None, wait_r
 
     for port in ports:
         container.with_exposed_ports(port)
+    for name, path in (volumes or {}).items():
+        container.with_volume_mapping(name, path, 'rw')
     # Set after the default above so that a test can override it.
     for name, value in (env or {}).items():
         container.with_env(name, value)
@@ -69,14 +74,16 @@ def postfix_factory(postfix_image, shared_network, request):
 
     "files" writes files into the container before it starts, for the
     configuration that is documented as mounted instead of set through
-    environment variables. "wait_ready" can be turned off for containers
-    that are not expected to come up at all.
+    environment variables. "volumes" maps a docker volume name to a path, for
+    the state the image is documented to keep across containers.
+    "wait_ready" can be turned off for containers that are not expected to
+    come up at all.
     """
     started = []
 
-    def start(env=None, files=None, ports=(25,), wait_ready=True):
+    def start(env=None, files=None, volumes=None, ports=(25,), alias=None, wait_ready=True):
         container = _start(postfix_image, shared_network, env=env, files=files,
-                           ports=ports, wait_ready=wait_ready)
+                           volumes=volumes, ports=ports, alias=alias, wait_ready=wait_ready)
         started.append(container)
         return container
 
@@ -85,3 +92,28 @@ def postfix_factory(postfix_image, shared_network, request):
     for number, container in reversed(list(enumerate(started, start=1))):
         print_log_on_failure(request, f"postfix ({number})", container)
         container.stop()
+
+
+@pytest.fixture
+def docker_volume():
+    """An empty docker volume, for the state the image keeps across containers.
+
+        relay = postfix_factory(volumes={docker_volume: '/etc/opendkim/keys'})
+    """
+    volume = docker.from_env().volumes.create()
+
+    yield volume.name
+
+    # The containers using it are removed by the fixtures that started them,
+    # which pytest may tear down after this one, and docker refuses to remove
+    # a volume still attached to a container.
+    poll_until(lambda: _removed(volume), timeout=30,
+               description=f"volume {volume.name} to be removable")
+
+
+def _removed(volume):
+    try:
+        volume.remove()
+    except docker.errors.APIError:
+        return False
+    return True
