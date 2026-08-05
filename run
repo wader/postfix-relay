@@ -129,23 +129,6 @@ for e in ${!POSTFIXMASTER_*} ; do v="${e:14}" && postconf -Me "${v//__/\/}=${!e}
 # POSTMAP_var env value -> /etc/postfix/var
 for e in ${!POSTMAP_*} ; do echo "${!e}" > "/etc/postfix/${e:8}" && postmap "/etc/postfix/${e:8}"; done
 
-# POSTMASTER_ADDRESS env -> route postfix's own notifications (notify_classes)
-# to a mailbox someone reads. They are addressed to the unqualified
-# "postmaster", which append_at_myorigin turns into postmaster@$myorigin, the
-# relay's own name. A relay accepts no mail for itself, so the notices are
-# deferred until they time out and are then dropped. Runs after the POSTFIX_
-# loop above, so an explicitly set POSTFIX_<class>_notice_recipient wins.
-# notify_classes is left alone: setting bounce/2bounce/delay recipients is
-# inert until someone widens it, it just means they are already correct then.
-if [ ! -z "$POSTMASTER_ADDRESS" ] ; then
-  for c in error bounce 2bounce delay ; do
-    v="POSTFIX_${c}_notice_recipient"
-    if [ -z "${!v}" ] ; then
-      postconf -e "${c}_notice_recipient=$POSTMASTER_ADDRESS"
-    fi
-  done
-fi
-
 chown -R postfix:postfix /var/lib/postfix /var/spool/postfix
 
 # OPENDKIM_var env -> put "key value" line in /etc/opendkim.conf
