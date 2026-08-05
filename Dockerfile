@@ -1,5 +1,5 @@
 # bump: debian-trixie-slim /FROM debian:(.*)/ docker:debian|/^trixie-.*-slim/|sort
-FROM debian:trixie-20260713-slim
+FROM debian:trixie-20260803-slim
 LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com>"
 
 # postsrsd is optional and only installed where Debian builds it: it is missing
