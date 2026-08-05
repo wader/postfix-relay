@@ -24,6 +24,10 @@ and remote servers should see: it is used for the 220 greeting and HELO, and
 it also affects `Received` headers and the envelope sender of mail postfix
 generates itself.
 
+The image keeps Debian's `inet_protocols = ipv4`, so it neither accepts
+connections nor delivers mail over IPv6. Set `POSTFIX_inet_protocols=all` if
+your docker network has IPv6, or recipients you send to are IPv6 only.
+
 You can modify master.cf using postconf with `POSTFIXMASTER_` variables. All double `__` symbols will be replaced with `/`. For example
 
 ### Postfix master.cf variables
@@ -78,6 +82,53 @@ environment:
   - POSTFIX_smtpd_sasl_security_options=noanonymous
   - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
 ```
+
+### Securing the relay
+
+The default configuration is an open relay that relies on docker networking for
+protection: anything that can reach port 25 can send mail through it, to
+anyone. That is fine while the port is only reachable from other containers on
+the same docker network, and it is why the port should not be published unless
+something outside docker really has to reach it.
+
+If it does, stop relaying for the whole world first, either by restricting who
+may relay by address:
+
+```
+environment:
+  # Whatever your docker network actually is
+  - POSTFIX_mynetworks=127.0.0.0/8,172.16.0.0/12
+```
+
+or by requiring authentication, using the setup described above and refusing
+everyone else:
+
+```
+environment:
+  - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
+```
+
+Clients that authenticate should also be able to do it over an encrypted
+connection, otherwise the password crosses the network in the clear. Mount a
+certificate and its key, and point postfix at them:
+
+```
+volumes:
+  - /your_local_path/cert.pem:/etc/postfix/tls/cert.pem:ro
+  - /your_local_path/key.pem:/etc/postfix/tls/key.pem:ro
+environment:
+  - POSTFIX_smtpd_tls_cert_file=/etc/postfix/tls/cert.pem
+  - POSTFIX_smtpd_tls_key_file=/etc/postfix/tls/key.pem
+  # "may" advertises STARTTLS, "encrypt" refuses clients that do not use it
+  - POSTFIX_smtpd_tls_security_level=may
+  # Never accept credentials over an unencrypted connection
+  - POSTFIX_smtpd_tls_auth_only=yes
+```
+
+Mail leaving the relay is already sent over TLS whenever the receiving server
+offers it (`POSTFIX_smtp_tls_security_level=may`). Set it to `encrypt` when
+relaying through a provider, where an unencrypted connection is a
+misconfiguration rather than the only option.
 
 ### OpenDKIM variables
 
