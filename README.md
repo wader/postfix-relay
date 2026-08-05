@@ -170,6 +170,42 @@ volumes:
 
 Note that Debian does not build postsrsd for armhf in trixie, so SRS is unavailable on the `arm/v7` image. Setting `POSTSRSD_SRS_DOMAIN` there stops the container with an explicit error rather than relaying without the rewriting you asked for.
 
+### Postmaster notifications
+
+Postfix reports problems with itself by mailing the postmaster — the queue
+filling up, a daemon that keeps crashing. Which problems are reported is
+controlled by [notify_classes](https://www.postfix.org/postconf.5.html#notify_classes),
+`resource, software` by default.
+
+Those notices are addressed to the unqualified `postmaster`, which postfix
+qualifies with the relay's own hostname. A relay accepts no mail for itself, so
+out of the box they are deferred until they time out and are then dropped: no
+one is told that anything is wrong. Set `POSTMASTER_ADDRESS` to a mailbox
+someone reads:
+
+```
+environment:
+  - POSTMASTER_ADDRESS=ops@domain.tld
+```
+
+This points [error_notice_recipient](https://www.postfix.org/postconf.5.html#error_notice_recipient),
+`bounce_notice_recipient`, `2bounce_notice_recipient` and
+`delay_notice_recipient` at that address. If you set any of those yourself with
+the matching `POSTFIX_<name>` variable, your value is used instead.
+
+Setting all four does not change how much mail you get: `notify_classes` keeps
+its default, and the bounce, 2bounce and delay recipients are only used if you
+widen it with `POSTFIX_notify_classes`. They are set anyway so that they are
+already correct if you do.
+
+Set `POSTFIX_myhostname` as well, or the notices may still be refused. They are
+sent *from*
+[double_bounce_sender](https://www.postfix.org/postconf.5.html#double_bounce_sender)
+qualified with `myorigin`, which derives from `myhostname` — so with the default
+they come from `double-bounce@hostname`, a domain that does not resolve, and a
+receiver that rejects unknown sender domains will turn them away however good
+the recipient address is.
+
 ### Using docker run
 ```
 docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
