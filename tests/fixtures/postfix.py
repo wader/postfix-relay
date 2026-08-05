@@ -6,13 +6,17 @@ from testcontainers.core.image import DockerImage
 from testcontainers.core.waiting_utils import wait_for_logs
 
 @pytest.fixture(scope="session")
-def postfix(shared_network):
+def postfix_image():
     root_path = os.path.dirname(__file__) + '/../../'
     image = DockerImage(path=root_path, tag="postfix-relay:test")
 
     image.build()
 
-    container = DockerContainer(image=str(image)) \
+    return str(image)
+
+@pytest.fixture(scope="session")
+def postfix(shared_network, postfix_image):
+    container = DockerContainer(image=postfix_image) \
         .with_network(shared_network) \
         .with_network_aliases('postfix') \
         .with_exposed_ports(25) \
