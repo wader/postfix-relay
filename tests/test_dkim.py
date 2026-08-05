@@ -46,6 +46,13 @@ def test_mail_is_signed_for_configured_domains_only(postfix_factory, mailpit):
     assert 'dkim-signature' not in mailpit.wait_for_message('not signed')['headers']
 
 
+def test_the_private_key_is_only_readable_by_opendkim(postfix_factory):
+    """OpenDKIM refuses a key other users can read, and logs instead of signing."""
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1'})
+
+    assert container_exec(relay, f"stat -c %U:%G:%a {KEY_PATH}").strip() == 'opendkim:opendkim:600'
+
+
 def test_keys_are_reused_after_a_restart(postfix_factory, mailpit):
     """Restarting must not hand out a new key, the published DNS record
     would stop matching and every signed mail would fail validation."""
