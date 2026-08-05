@@ -30,10 +30,10 @@ secretsFromFiles()
 {
     local file var
     for file in ${!POSTFIX_*} ${!POSTFIXMASTER_*} ${!POSTMAP_*} ${!OPENDKIM_*} ${!POSTSRSD_*} ; do
-      var="${file%_FILE}"
-      if [ "$var" == "$file" ] ; then
+      if [[ "$file" != *_FILE ]] ; then
         continue
       fi
+      var="${file%_FILE}"
 
       # The image ships defaults for several of these variables, POSTFIX_myhostname
       # and the OPENDKIM_ ones among them, so finding one already set is normal
