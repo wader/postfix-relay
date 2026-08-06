@@ -320,11 +320,21 @@ environment:
 
 #### I see `key data is not secure: /etc/opendkim/keys can be read or written by other users` error messages.
 
-Some Docker distributions like Docker for Windows and RancherOS seems to handle
-volume permission in way that does not work with OpenDKIM default behavior of
-ensuring safe permissions on private keys.
+OpenDKIM checks the whole path down to a private key, not just the key file,
+and refuses to sign with a key it could reach through a directory other users
+can write. It names that directory in the error, which is why the message can
+point at `/etc/opendkim/keys` while the key itself has perfectly good
+permissions.
 
-A workaround is to disable the check using a `OPENDKIM_RequireSafeKeys=no` environment variable.
+Some Docker distributions like Docker for Windows and RancherOS seems to handle
+volume permission in way that does not work with that behavior. The image now
+gives `/etc/opendkim/keys` and each domain directory below it to `opendkim`
+with mode `700` every time it starts, so a volume mounted with a loose mode is
+corrected rather than inherited, and this error should no longer happen.
+
+If it still does, the volume driver is not honouring those changes. A
+workaround is to disable the check using a `OPENDKIM_RequireSafeKeys=no`
+environment variable, at the cost of the protection it provides.
 
 ## SPF
 When sending email using your own SMTP server it is probably a good idea
