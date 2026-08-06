@@ -33,6 +33,16 @@ dkimConfig()
     rm -f /etc/opendkim/KeyTable
     rm -f /etc/opendkim/SigningTable
 
+    # opendkim walks the whole path down to a key and refuses one that any
+    # other user could read or write, naming the directory it stopped at
+    # rather than the key. /etc/opendkim/keys is where a volume gets mounted,
+    # so its mode is whatever the volume driver left behind and not something
+    # the image ever set: secure it here, along with the per-domain
+    # directories below, or opendkim declines to sign with a key whose own
+    # permissions are perfectly fine.
+    chown opendkim:opendkim /etc/opendkim/keys
+    chmod a=,u=rwx /etc/opendkim/keys
+
     echo "DNS records:"
     for d in $OPENDKIM_DOMAINS ; do
       domain=$(echo "$d"| cut -f1 -d '=')
@@ -52,6 +62,7 @@ dkimConfig()
 
       # Ensure strict permissions required by opendkim
       chown opendkim:opendkim "$domainDir" "$privateFile"
+      chmod a=,u=rwx "$domainDir"
       chmod a=,u=rw "$privateFile"
 
       echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
