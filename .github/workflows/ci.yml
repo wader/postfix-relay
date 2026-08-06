@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   docker:
+    name: "Build Image"
     runs-on: ubuntu-latest
     steps:
       -
