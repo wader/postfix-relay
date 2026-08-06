@@ -130,6 +130,45 @@ offers it (`POSTFIX_smtp_tls_security_level=may`). Set it to `encrypt` when
 relaying through a provider, where an unencrypted connection is a
 misconfiguration rather than the only option.
 
+#### What runs as root, and what to take away
+
+The container starts as root and cannot do otherwise: postfix refuses to run as
+anyone else (`the postfix command is reserved for the superuser`). It binds
+port 25, sets up its chroots and then drops privileges by itself, so what
+actually handles mail is not root:
+
+| Process | Runs as |
+| --- | --- |
+| the start-up script, `master`, `rsyslogd` | `root` |
+| `smtpd`, `cleanup`, `qmgr`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
+| `opendkim` | `opendkim` |
+| `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
+
+The root processes supervise and log; they do not parse anything a stranger
+sent. Most of what docker grants the container by default is therefore unused
+and can be taken away:
+
+```
+cap_drop:
+  - ALL
+cap_add:
+  - CHOWN            # hand the queue to postfix and the DKIM keys to opendkim
+  - DAC_OVERRIDE     # read them back afterwards
+  - FOWNER           # set their modes
+  - NET_BIND_SERVICE # port 25, where docker does not already allow it
+  - SETGID           # the daemons dropping privileges
+  - SETUID
+  - SYS_CHROOT       # the jails they drop into
+security_opt:
+  - no-new-privileges
+```
+
+That leaves `AUDIT_WRITE`, `FSETID`, `KILL`, `MKNOD`, `NET_RAW`, `SETFCAP` and
+`SETPCAP` dropped, `NET_RAW` — raw sockets, and the packet spoofing that comes
+with them — being the one worth the trouble on a container that listens on a
+network. Relaying, signing, rewriting, the health check and a graceful stop all
+work with the set above, and a test checks that they do.
+
 ### OpenDKIM variables
 
 OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can be set

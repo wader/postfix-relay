@@ -27,7 +27,7 @@ def postfix_image():
 
 
 def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
-           wait_ready=True):
+           wait_ready=True, kwargs=None):
     container = DockerContainer(image=image) \
         .with_network(network) \
         .with_network_aliases(alias or f"postfix-{next(_alias_numbers)}") \
@@ -44,6 +44,10 @@ def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alia
     # file would look, without needing anything writable on the host.
     for path, content in (files or {}).items():
         container.with_copy_into_container(content.encode(), path)
+    # Straight to docker, for what a test needs to say about the container
+    # itself rather than about its configuration, such as capabilities.
+    if kwargs:
+        container.with_kwargs(**kwargs)
 
     container.start()
 
@@ -77,13 +81,15 @@ def postfix_factory(postfix_image, shared_network, request):
     environment variables. "volumes" maps a docker volume name to a path, for
     the state the image is documented to keep across containers.
     "wait_ready" can be turned off for containers that are not expected to
-    come up at all.
+    come up at all, and "kwargs" is passed to docker as is.
     """
     started = []
 
-    def start(env=None, files=None, volumes=None, ports=(25,), alias=None, wait_ready=True):
+    def start(env=None, files=None, volumes=None, ports=(25,), alias=None, wait_ready=True,
+              kwargs=None):
         container = _start(postfix_image, shared_network, env=env, files=files,
-                           volumes=volumes, ports=ports, alias=alias, wait_ready=wait_ready)
+                           volumes=volumes, ports=ports, alias=alias, wait_ready=wait_ready,
+                           kwargs=kwargs)
         started.append(container)
         return container
 
