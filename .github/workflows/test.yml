@@ -21,6 +21,7 @@ jobs:
         name: Event File
         path: ${{ github.event_path }}
   docker:
+    name: "Pytest"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
