@@ -1,0 +1,29 @@
+# Automatic dependency update pull requests
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#
+# Scope is limited to GitHub Actions on purpose:
+# - the Dockerfile base image is already managed by wader/bump (see bump.yml)
+# - tests/requirements.txt is unpinned, so there are no versions to bump
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Minor and patch bumps are grouped into a single PR that the
+      # dependabot-auto-merge workflow merges once CI passes
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      # Major bumps can contain breaking changes, keep them in a separate
+      # PR that waits for human review
+      actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
