@@ -326,6 +326,20 @@ ensuring safe permissions on private keys.
 
 A workaround is to disable the check using a `OPENDKIM_RequireSafeKeys=no` environment variable.
 
+#### I set `user:` in my compose file and the container fails with `/bin/bash: /root/run: Permission denied`.
+
+The container has to start as root, and the message is only the first thing
+that goes wrong: postfix refuses to run as anyone else anyway, with `the
+postfix command is reserved for the superuser`. It binds port 25, sets up its
+chroot and then drops privileges by itself — the daemons handling mail run as
+`postfix`, and OpenDKIM as `opendkim`, whatever `user:` says.
+
+Setting `user:` to avoid ownership surprises on mounted directories does not
+help either: the container gives the DKIM keys to `opendkim` and the queue to
+`postfix` on every start, so on the host they end up owned by those uids as
+seen from outside. That is what postfix and OpenDKIM require, and the files
+are only read by the container itself.
+
 ## SPF
 When sending email using your own SMTP server it is probably a good idea
 to setup [SPF](https://en.wikipedia.org/wiki/Sender_Policy_Framework) for the
