@@ -3,8 +3,12 @@
 #
 # Requirements:
 # - "Allow auto-merge" enabled in the repository settings
-# - a branch protection rule / ruleset on master with required status
-#   checks, otherwise auto-merge completes without waiting for CI
+# - a ruleset on master with required status checks, otherwise auto-merge
+#   does not wait for CI and merges straight away
+#
+# Required checks are matched by job name, not by workflow name. The names
+# that exist are "Build Image", "Pytest", "Event File" and "Test Results";
+# "ci" and "test" are workflows and never report a check of their own.
 
 name: Dependabot auto-merge
 

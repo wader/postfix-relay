@@ -1,4 +1,3 @@
-# bump: debian-trixie-slim /FROM debian:(.*)/ docker:debian|/^trixie-.*-slim/|sort
 FROM debian:trixie-20260824-slim
 LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com>"
 
