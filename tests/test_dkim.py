@@ -53,6 +53,51 @@ def test_the_private_key_is_only_readable_by_opendkim(postfix_factory):
     assert container_exec(relay, f"stat -c %U:%G:%a {KEY_PATH}").strip() == 'opendkim:opendkim:600'
 
 
+def test_the_directories_holding_the_keys_are_secured_too(postfix_factory):
+    """Regression test for issue #92.
+
+    opendkim walks the whole path down to a key and refuses one it could reach
+    through a directory other users can write, naming that directory rather
+    than the key. The key file's own mode being right is not enough, so a
+    correct key was refused and the only answer the README had was to turn the
+    check off with OPENDKIM_RequireSafeKeys=no.
+    """
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1'})
+
+    for path in ['/etc/opendkim/keys', '/etc/opendkim/keys/example.com']:
+        assert container_exec(relay, ["stat", "-c", "%U:%G:%a", path]).strip() == \
+            'opendkim:opendkim:700'
+
+
+def test_a_key_volume_left_open_by_its_driver_is_corrected(docker_volume, postfix_factory,
+                                                           mailpit):
+    """The mode of /etc/opendkim/keys is whatever mounting left behind.
+
+    The README blames this on volume handling in Docker for Windows and
+    RancherOS. Nothing in the test suite can mount such a volume, but the fix
+    is that the image stops trusting the mode it is given and sets it on every
+    start, which a volume made writable by hand exercises just as well.
+    """
+    env = {'OPENDKIM_DOMAINS': 'example.com=sel1'}
+    relay = postfix_factory(env=env, volumes={docker_volume: '/etc/opendkim/keys'})
+
+    container_exec(relay, ["chmod", "-R", "a=rwx", "/etc/opendkim/keys"])
+
+    restart(relay)
+
+    assert container_exec(relay, ["stat", "-c", "%a", "/etc/opendkim/keys"]).strip() == '700'
+    assert container_exec(relay, ["stat", "-c", "%a", KEY_PATH]).strip() == '600'
+
+    # And the point of all of it: opendkim signs instead of logging that the
+    # key data is not secure.
+    send(relay, sender='sender@example.com', subject='signed despite the volume mode',
+         body='signed body')
+
+    raw = mailpit.raw(mailpit.wait_for_message('signed despite the volume mode')['ID'])
+
+    assert verifies(raw, dkim_dns_record(relay, 'example.com', 'sel1'))
+
+
 def test_keys_are_reused_after_a_restart(postfix_factory, mailpit):
     """Restarting must not hand out a new key, the published DNS record
     would stop matching and every signed mail would fail validation."""
