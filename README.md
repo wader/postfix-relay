@@ -60,6 +60,60 @@ mydomain.com relay:[relay1.mydomain.com]:587
 ```
 and run `postmap /etc/postfix/transport`.
 
+Generated tables and the databases built from them are readable by postfix
+only, as they regularly hold passwords.
+
+### Secrets from files
+
+Every `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`, `OPENDKIM_` and `POSTSRSD_`
+variable can be suffixed with `_FILE` and given a path instead of a value. The
+container then reads the value from that file, so credentials never have to be
+put in the environment where `docker inspect`, the compose file and every
+process in the container can see them. A trailing newline is ignored.
+
+```
+environment:
+  - POSTMAP_sasl_passwd_FILE=/run/secrets/sasl_passwd
+secrets:
+  - sasl_passwd
+```
+
+The file wins when `<name>` is set as well, which is what happens whenever the
+variable is one the image gives a default to, and the container says so in its
+log. A path that cannot be read stops the container.
+
+### Relaying through another SMTP server
+
+To hand mail over to a provider instead of delivering it yourself, point
+`POSTFIX_relayhost` at it and give postfix the credential in a lookup table:
+
+```
+smtp:
+  image: mwader/postfix-relay
+  environment:
+    - POSTFIX_myhostname=smtp.domain.tld
+    - POSTFIX_relayhost=[smtp.provider.tld]:587
+    - POSTFIX_smtp_sasl_auth_enable=yes
+    - POSTFIX_smtp_sasl_password_maps=hash:/etc/postfix/sasl_passwd
+    - POSTFIX_smtp_sasl_security_options=noanonymous
+    # Refuse to send at all if the connection cannot be encrypted
+    - POSTFIX_smtp_tls_security_level=encrypt
+    - POSTMAP_sasl_passwd_FILE=/run/secrets/sasl_passwd
+  secrets:
+    - sasl_passwd
+
+secrets:
+  sasl_passwd:
+    file: ./sasl_passwd
+```
+
+where `./sasl_passwd` holds one line per relay host, matching `relayhost`
+including its brackets and port:
+
+```
+[smtp.provider.tld]:587 username:password
+```
+
 ### Relay Client Authentication
 The container includes [Postfix SASL](https://www.postfix.org/SASL_README.html) authentication options that are disabled by default.
 
