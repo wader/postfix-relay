@@ -4,11 +4,14 @@ LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com
 
 # postsrsd is optional and only installed where Debian builds it: it is missing
 # for armhf in trixie, which is the linux/arm/v7 image.
+# perl is spelled out because qshape, part of the postfix package, needs
+# File::Find from perl-modules, and --no-install-recommends keeps that out.
 RUN \
   apt-get update && \
   apt-get -y --no-install-recommends install \
     procps \
     postfix \
+    perl \
     libsasl2-modules \
     libpam-pwdfile \
     sasl2-bin \
