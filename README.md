@@ -351,6 +351,10 @@ with them — being the one worth the trouble on a container that listens on a
 network. Relaying, signing, rewriting, the health check and a graceful stop all
 work with the set above, and a test checks that they do.
 
+Under `docker stack deploy` the `security_opt` line is dropped — swarm prints
+`Ignoring unsupported options: security_opt` and the container starts without
+`no-new-privileges`. The capability set above is passed through unchanged.
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- SPF AND DKIM -->
