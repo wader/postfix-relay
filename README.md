@@ -555,8 +555,8 @@ configuration and keeps it for the whole run, so it is the one to reach for
 unless the test kills a daemon, edits a file or restarts the container.
 
 A defect that is understood but not fixed yet is covered by a test that
-asserts the behaviour there should be, marked `xfail(strict=True)` with a
-one line reason saying what is wrong. The run stays green while the defect
+asserts the behaviour there should be, marked `xfail(strict=True)` with the
+issue it belongs to. The run stays green while the defect
 is open, and the day it is fixed the strict marker turns the now passing
 test red until the marker is removed, so the coverage is never quietly
 lost.

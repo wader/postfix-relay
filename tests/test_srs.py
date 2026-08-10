@@ -224,7 +224,7 @@ def test_every_postsrsd_variable_reaches_the_daemon(postfix_shared):
         f'SRS_DOMAIN={SRS_DOMAIN}', 'SRS_HASHLENGTH=8', 'SRS_HASHMIN=6']
 
 
-@pytest.mark.xfail(reason="known defect: the value is written unquoted into a "
+@pytest.mark.xfail(reason="see issue #177: the value is written unquoted into a "
                           "file the init script sources", strict=True)
 def test_a_setting_that_needs_a_space_can_be_passed_through(postfix_factory):
     """postsrsd's own extra options are documented as a list.

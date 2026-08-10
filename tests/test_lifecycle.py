@@ -223,7 +223,7 @@ def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix
     """
     if daemon != 'rsyslogd':
         request.node.add_marker(pytest.mark.xfail(
-            reason="known defect: only rsyslogd is started in the foreground, "
+            reason="see issue #176: only rsyslogd is started in the foreground, "
                    "so it is the only one \"wait\" is waiting for",
             strict=True))
 
@@ -234,7 +234,7 @@ def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix
     assert exit_code_within(relay) == 1
 
 
-@pytest.mark.xfail(reason="known defect: nothing recreates the chroot's /dev "
+@pytest.mark.xfail(reason="see issue #180: nothing recreates the chroot's /dev "
                           "when the queue is mounted from an empty directory",
                    strict=True)
 def test_the_chroot_still_works_when_the_queue_is_mounted_from_the_host(

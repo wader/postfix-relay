@@ -243,7 +243,7 @@ def test_saslauthd_answers_inside_the_postfix_chroot(authenticated_relay):
     assert 'sasl' in container_exec(authenticated_relay, ["id", "postfix"])
 
 
-@pytest.mark.xfail(reason="known defect: the statoverride is recorded but never "
+@pytest.mark.xfail(reason="see issue #179: the statoverride is recorded but never "
                           "applied, so the directory keeps the mode mkdir gave it",
                    strict=True)
 def test_the_saslauthd_socket_is_restricted_to_the_sasl_group(authenticated_relay):
@@ -287,7 +287,7 @@ def test_the_upstream_password_never_reaches_the_log(postfix_shared):
     assert 'relaypass' not in container_log(relay)
 
 
-@pytest.mark.xfail(reason="known defect: the table is written with the default "
+@pytest.mark.xfail(reason="see issue #178: the table is written with the default "
                           "umask, so every user in the container can read it",
                    strict=True)
 def test_the_upstream_password_is_not_readable_by_every_user(postfix_shared):
