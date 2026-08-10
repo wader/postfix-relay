@@ -144,9 +144,9 @@ actually handles mail is not root:
 | `opendkim` | `opendkim` |
 | `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
 
-The root processes supervise and log; they do not parse anything a stranger
-sent. Most of what docker grants the container by default is therefore unused
-and can be taken away:
+The root processes supervise and log; they do not parse untrusted input. Most
+of what docker grants the container by default is therefore unused and can be
+taken away:
 
 ```
 cap_drop:
