@@ -123,3 +123,49 @@ def _removed(volume):
     except docker.errors.APIError:
         return False
     return True
+
+
+@pytest.fixture(scope="session")
+def _relay_pool(postfix_image, shared_network):
+    """Relays kept for the whole session, one per configuration asked for.
+
+    Starting a container is most of what the suite costs, so the tests that
+    only read a relay back -- what it advertises, what it wrote, what it does
+    with a message -- share one instead of starting their own.
+    """
+    containers = {}
+
+    yield containers
+
+    for container in reversed(list(containers.values())):
+        container.stop()
+
+
+@pytest.fixture
+def postfix_shared(_relay_pool, postfix_image, shared_network, request):
+    """Relay shared by every test asking for the same configuration.
+
+        relay = postfix_shared(env={'OPENDKIM_DOMAINS': 'example.com'})
+
+    It takes the same "env", "files" and "ports" as "postfix_factory".
+    The first test to ask for a configuration starts it, the ones after reuse
+    it. That only holds for tests that leave the container as they found it:
+    anything that kills a daemon, edits a file or restarts the container has
+    to start its own with "postfix_factory".
+    """
+    used = []
+
+    def start(env=None, files=None, ports=(25,)):
+        key = (tuple(sorted((env or {}).items())),
+               tuple(sorted((files or {}).items())), tuple(ports))
+        if key not in _relay_pool:
+            _relay_pool[key] = _start(postfix_image, shared_network, env=env,
+                                      files=files, ports=ports)
+        container = _relay_pool[key]
+        used.append(container)
+        return container
+
+    yield start
+
+    for number, container in enumerate(used, start=1):
+        print_log_on_failure(request, f"shared postfix ({number})", container)
