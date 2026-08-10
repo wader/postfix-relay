@@ -8,7 +8,8 @@ turning one of them on by accident would change all of them at once.
 These tests share the default relay, so they cost no extra container.
 """
 
-from tests.helpers import esmtp_features, postconf, process_running, send
+from tests.helpers import (esmtp_features, listening_ports, postconf,
+                           process_running, send)
 
 
 def test_the_banner_announces_myhostname(postfix):
@@ -71,3 +72,61 @@ def test_envelope_senders_are_not_rewritten(postfix, mailpit):
     send(postfix, sender='sender@example.com', subject='not rewritten')
 
     assert mailpit.wait_for_message('not rewritten')['ReturnPath'] == 'sender@example.com'
+
+
+def test_only_the_smtp_port_is_open(postfix):
+    """A port nobody asked for is a service nobody is watching.
+
+    opendkim listens on 12301 and postsrsd on 10001 and 10002 once they are
+    turned on, so an image that started them by default would say so here.
+    """
+    assert listening_ports(postfix) == {25}
+
+
+def test_no_optional_daemon_is_running(postfix):
+    """The three daemons the environment turns on, all off at once."""
+    for daemon in ('opendkim', 'postsrsd', 'saslauthd'):
+        assert not process_running(postfix, daemon), daemon
+
+
+def test_the_relay_speaks_ipv4_only(postfix):
+    """Debian's default, which the README documents and tells users how to
+    change: a relay that quietly started answering on IPv6 would be reachable
+    from addresses a POSTFIX_mynetworks written for IPv4 does not cover."""
+    assert postconf(postfix, 'inet_protocols') == 'ipv4'
+
+
+def test_utf8_addresses_are_supported(postfix):
+    """SMTPUTF8, which is what an address with an accent in it needs."""
+    _, _, features = esmtp_features(postfix)
+
+    assert 'smtputf8' in features
+
+
+def test_nothing_is_rewritten_on_the_way_through(postfix):
+    """The rewriting SRS turns on is the only rewriting there is.
+
+    All four maps are empty by default, so an address that goes in is the
+    address that comes out, envelope and headers alike.
+    """
+    for parameter in ('sender_canonical_maps', 'recipient_canonical_maps',
+                      'canonical_maps', 'smtp_generic_maps', 'masquerade_domains'):
+        assert postconf(postfix, parameter) == '', parameter
+
+
+def test_the_queue_is_where_the_image_declares_the_volume(postfix):
+    """A queue somewhere else would be lost when the container is replaced,
+    whatever the Dockerfile declares."""
+    assert postconf(postfix, 'queue_directory') == '/var/spool/postfix'
+
+
+def test_mail_for_any_domain_is_accepted(postfix, mailpit):
+    """What "open relay" means, and the reason the README says not to publish
+    the port. Two unrelated domains, neither of them configured anywhere."""
+    send(postfix, recipients=('someone@first.example', 'someone@second.example'),
+         subject='any domain at all')
+
+    message = mailpit.wait_for_message('any domain at all')
+
+    assert sorted(to['Address'] for to in message['To']) == \
+        ['someone@first.example', 'someone@second.example']

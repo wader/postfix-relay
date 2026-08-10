@@ -112,3 +112,131 @@ def test_stopping_the_container_is_still_a_clean_exit(postfix_image):
         assert wrapped.wait(timeout=30)['StatusCode'] == 0
     finally:
         container.stop()
+
+
+@pytest.fixture
+def relay_factory(postfix_image):
+    """Relays for the tests that break them, stopped whatever happens."""
+    started = []
+
+    def start(**env):
+        container = start_relay(postfix_image, **env)
+        started.append(container)
+        return container
+
+    yield start
+
+    for container in reversed(started):
+        container.stop()
+
+
+def test_a_relay_that_was_not_asked_to_sign_is_healthy_without_opendkim(relay_factory):
+    """Only the daemons the environment asks for are required.
+
+    A check that wanted opendkim everywhere would report every default
+    deployment as broken.
+    """
+    relay = relay_factory()
+
+    assert relay.exec(["pgrep", "-x", "opendkim"]).exit_code != 0
+    assert run_healthcheck(relay, expected=0)[0] == 0
+
+
+def test_a_relay_with_every_feature_turned_on_is_healthy(relay_factory):
+    """Four daemons at once, which is the configuration with the most to
+    go wrong and the one the check exists for."""
+    relay = relay_factory(OPENDKIM_DOMAINS='example.com',
+                          POSTSRSD_SRS_DOMAIN='srs.example.com',
+                          SASL_Passwds='/etc/postfix/sasl/sasl_passwds')
+
+    for daemon in ('master', 'rsyslogd', 'opendkim', 'postsrsd', 'saslauthd'):
+        assert relay.exec(["pgrep", "-x", daemon]).exit_code == 0, daemon
+
+    assert run_healthcheck(relay, expected=0)[0] == 0
+
+
+def test_stopped_postsrsd_is_unhealthy(relay_factory):
+    """A relay that lost it keeps sending, with the envelope senders that
+    SRS was turned on to rewrite."""
+    relay = relay_factory(POSTSRSD_SRS_DOMAIN='srs.example.com')
+
+    relay.exec("pkill -x postsrsd")
+
+    exit_code, output = run_healthcheck(relay, expected=1)
+
+    assert exit_code == 1
+    assert 'envelope senders are not rewritten' in output
+
+
+def test_stopped_saslauthd_is_unhealthy(relay_factory):
+    """Nothing else notices: the relay stays up and simply refuses every
+    client that tries to authenticate."""
+    relay = relay_factory(SASL_Passwds='/etc/postfix/sasl/sasl_passwds')
+
+    relay.exec("pkill -x saslauthd")
+
+    exit_code, output = run_healthcheck(relay, expected=1)
+
+    assert exit_code == 1
+    assert 'clients cannot authenticate' in output
+
+
+def test_a_postfix_that_is_not_running_is_unhealthy(relay_factory):
+    """The first thing the check looks at, and the one failure that means
+    no mail is being accepted at all."""
+    relay = relay_factory()
+
+    relay.exec("postfix stop")
+
+    exit_code, output = run_healthcheck(relay, expected=1)
+
+    assert exit_code == 1
+    assert 'postfix master is not running' in output
+
+
+def test_a_service_turned_off_with_maxproc_zero_is_not_expected_to_listen(relay_factory):
+    """Setting maxproc to 0 is how a service in master.cf is turned off.
+
+    A check that only looked for "inet" services would report a relay whose
+    submission port was deliberately disabled as broken.
+    """
+    relay = relay_factory()
+
+    relay.exec(["postconf", "-M", "-e", "submission/inet=" + SUBMISSION.split('=', 1)[1]
+                .replace('n - y - -', 'n - y - 0')])
+    relay.exec("postfix reload")
+
+    assert 'submission' in relay.exec(["postconf", "-M"]).output.decode()
+    assert run_healthcheck(relay, expected=0)[0] == 0
+
+
+def test_an_endpoint_given_as_a_number_is_checked(relay_factory):
+    """A service may name a port instead of a service name, and may bind to
+    one address, which the check has to read out of "host:port"."""
+    relay = relay_factory()
+
+    relay.exec(["postconf", "-M", "-e",
+                "127.0.0.1:10025/inet=127.0.0.1:10025 inet n - y - - smtpd"])
+
+    exit_code, output = run_healthcheck(relay, expected=1)
+    assert exit_code == 1
+    assert 'not listening on 127.0.0.1:10025' in output
+
+    relay.exec("postfix reload")
+
+    assert run_healthcheck(relay, expected=0)[0] == 0
+
+
+def test_the_check_writes_nothing_to_the_log(relay_factory):
+    """It runs every thirty seconds for the life of the container.
+
+    Reading the listening sockets from the kernel rather than connecting to
+    them is what keeps a connect and a disconnect out of the log each time.
+    """
+    relay = relay_factory()
+    before = relay.get_logs()[0].decode()
+
+    for _ in range(5):
+        assert run_healthcheck(relay, expected=0)[0] == 0
+
+    assert relay.get_logs()[0].decode() == before

@@ -6,8 +6,11 @@ waiting for a server that is down, and has to keep the mail it accepted.
 
 import time
 
-from tests.helpers import (container_exec, poll_until, process_running, restart, send,
-                           wait_for_file, wait_for_log, wait_for_smtp)
+import pytest
+
+from tests.helpers import (container_exec, container_log, exit_code_within, poll_until,
+                           process_running, restart, send, wait_for_file, wait_for_log,
+                           wait_for_smtp)
 
 
 def health(container):
@@ -130,3 +133,123 @@ def test_mail_waits_in_the_queue_until_the_relayhost_answers(postfix_factory,
     container_exec(relay, ["postqueue", "-f"])
 
     assert late.wait_for_message('deferred')
+
+
+def test_the_start_up_script_is_the_containers_first_process(postfix):
+    """It is what receives the SIGTERM docker sends, and its trap is what
+    turns that into a clean stop of every daemon."""
+    assert 'run' in container_exec(postfix, ["cat", "/proc/1/cmdline"])
+
+
+def test_the_queue_survives_replacing_the_container(docker_volume, postfix_factory,
+                                                    mailpit_factory):
+    """The reason /var/spool/postfix is a volume, and what the README says
+    to mount it for.
+
+    Mail that was accepted has been promised to the sender, so a container
+    that is replaced while the next hop is down must hand the queue over to
+    its replacement rather than lose it.
+    """
+    env = {'POSTFIX_relayhost': 'replacement-target:1025'}
+    volumes = {docker_volume: '/var/spool/postfix'}
+
+    first = postfix_factory(env=env, volumes=volumes)
+    send(first, subject='queued across containers')
+    wait_for_log(first, 'status=deferred')
+    first.get_wrapped_container().stop()
+
+    second = postfix_factory(env=env, volumes=volumes)
+
+    assert 'receiver@example.com' in container_exec(second, ["postqueue", "-p"])
+
+    late = mailpit_factory('replacement-target')
+    container_exec(second, ["postqueue", "-f"])
+
+    assert late.wait_for_message('queued across containers')
+
+
+def test_the_relay_comes_back_from_several_restarts(postfix_factory, mailpit):
+    """Nothing in the start-up is one-shot.
+
+    Every restart runs the whole script again over a filesystem it already
+    wrote, which is where an unrepeatable step would show up.
+    """
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com=sel1',
+                                 'POSTSRSD_SRS_DOMAIN': 'srs.example.com'})
+
+    for attempt in range(3):
+        restart(relay)
+
+        send(relay, sender='sender@example.com', subject=f'restart {attempt}')
+        message = mailpit.wait_for_message(f'restart {attempt}')
+
+        assert 'dkim-signature' in message['headers']
+        assert message['ReturnPath'].startswith('SRS0=')
+
+
+def test_an_interrupt_stops_the_container_cleanly(postfix_factory):
+    """The trap catches SIGINT as well as SIGTERM, which is what a relay
+    started in the foreground with "docker run" is stopped with."""
+    relay = postfix_factory()
+    wrapped = relay.get_wrapped_container()
+
+    wrapped.kill(signal='SIGINT')
+
+    assert wrapped.wait(timeout=30)['StatusCode'] == 0
+
+
+# Every daemon "run" starts, and what turns it on. rsyslogd is the only one
+# it starts in the foreground, and the only one whose death it notices.
+SUPERVISED_DAEMONS = [
+    ('rsyslogd', {}),
+    ('master', {}),
+    ('opendkim', {'OPENDKIM_DOMAINS': 'example.com'}),
+    ('postsrsd', {'POSTSRSD_SRS_DOMAIN': 'srs.example.com'}),
+    ('saslauthd', {'SASL_Passwds': '/etc/postfix/sasl/sasl_passwds'}),
+]
+
+
+@pytest.mark.parametrize("daemon,env", SUPERVISED_DAEMONS,
+                         ids=[daemon for daemon, _ in SUPERVISED_DAEMONS])
+def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix_factory,
+                                                            request):
+    """The README's promise, for each of the five daemons in turn.
+
+    "A daemon that later gives up on its own exits the container non-zero,
+    so restart: on-failure brings it back". A relay that keeps running
+    without one of them keeps accepting mail: unsigned, unrewritten,
+    unlogged, or -- when it is the postfix master that is gone -- not at
+    all, with nothing but the health check to say so.
+    """
+    if daemon != 'rsyslogd':
+        request.node.add_marker(pytest.mark.xfail(
+            reason="known defect: only rsyslogd is started in the foreground, "
+                   "so it is the only one \"wait\" is waiting for",
+            strict=True))
+
+    relay = postfix_factory(env=env)
+
+    relay.exec(f"pkill -x {daemon}")
+
+    assert exit_code_within(relay) == 1
+
+
+@pytest.mark.xfail(reason="known defect: nothing recreates the chroot's /dev "
+                          "when the queue is mounted from an empty directory",
+                   strict=True)
+def test_the_chroot_still_works_when_the_queue_is_mounted_from_the_host(
+        tmp_path, postfix_factory):
+    """The README's own volume example is a host directory, which is empty.
+
+    Postfix runs its daemons chrooted in the queue directory and rsyslog
+    puts a second log socket in the /dev inside it. Mounting over the queue
+    hides that directory, rsyslogd reports it cannot create the socket, and
+    the daemons that connect to syslog after chrooting are logged nowhere.
+    """
+    queue = tmp_path / "spool"
+    queue.mkdir()
+
+    relay = postfix_factory(volumes={str(queue): '/var/spool/postfix'})
+
+    assert relay.exec(["test", "-S", "/var/spool/postfix/dev/log"]).exit_code == 0
+    assert 'cannot create' not in container_log(relay)
