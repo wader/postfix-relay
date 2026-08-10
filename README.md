@@ -1,12 +1,103 @@
+<div id="top"></div>
+
 # postfix-relay
+
 Postfix SMTP relay docker image. Useful for sending email without using an
 external SMTP server.
 
 Default configuration is an open relay that relies on docker networking for
-protection. So be careful to not expose it publicly.
+protection. So be careful to not expose it publicly, see
+[Securing the relay](#securing-the-relay).
 
-## Usage
-`docker pull mwader/postfix-relay` or clone/build it yourself. Docker hub image is built for `amd64`, `arm/v7` and `arm64`.
+## Table of contents
+<ol>
+  <li><a href="#supported-architectures">Supported architectures</a></li>
+  <li><a href="#quick-start">Quick start</a></li>
+  <li>
+    <a href="#configuration">Configuration</a>
+    <ul>
+      <li><a href="#postfix-variables">Postfix variables</a></li>
+      <li><a href="#postfix-mastercf-variables">Postfix master.cf variables</a></li>
+      <li><a href="#postfix-lookup-tables">Postfix lookup tables</a></li>
+      <li><a href="#opendkim-variables">OpenDKIM variables</a></li>
+      <li><a href="#postsrsd-variables">PostSRSd variables</a></li>
+      <li><a href="#postmaster-notifications">Postmaster notifications</a></li>
+      <li><a href="#timezone">Timezone</a></li>
+    </ul>
+  </li>
+  <li>
+    <a href="#securing-the-relay">Securing the relay</a>
+    <ul>
+      <li><a href="#client-authentication">Client authentication</a></li>
+      <li><a href="#what-runs-as-root-and-what-to-take-away">What runs as root, and what to take away</a></li>
+    </ul>
+  </li>
+  <li>
+    <a href="#spf-and-dkim">SPF and DKIM</a>
+    <ul>
+      <li><a href="#spf">SPF</a></li>
+      <li><a href="#dkim">DKIM</a></li>
+    </ul>
+  </li>
+  <li><a href="#volumes">Volumes</a></li>
+  <li>
+    <a href="#logging">Logging</a>
+    <ul>
+      <li><a href="#advanced-logging-configuration">Advanced logging configuration</a></li>
+    </ul>
+  </li>
+  <li><a href="#health-check">Health check</a></li>
+  <li><a href="#troubleshooting">Troubleshooting</a></li>
+  <li><a href="#testing">Testing</a></li>
+  <li><a href="#license">License</a></li>
+</ol>
+
+<!-- SUPPORTED ARCHITECTURES -->
+## Supported architectures
+
+The Docker hub image is built for the following CPU architectures:
+
+- `amd64`
+- `arm/v7`
+- `arm64`
+
+Note that [SRS rewriting](#postsrsd-variables) is unavailable on `arm/v7`.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- QUICK START -->
+## Quick start
+
+`docker pull mwader/postfix-relay` or clone/build it yourself.
+
+You probably want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO), see
+[Postfix variables](#postfix-variables).
+
+### Using docker run
+```
+docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
+```
+
+### Using docker-compose
+```
+app:
+  # use hostname "smtp" as SMTP server
+
+smtp:
+  image: mwader/postfix-relay
+  restart: always
+  environment:
+    - POSTFIX_myhostname=smtp.domain.tld
+    - OPENDKIM_DOMAINS=smtp.domain.tld
+```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- CONFIGURATION -->
+## Configuration
+
+Everything is configured with environment variables, one prefix per daemon, plus
+a few files to mount. See [Dockerfile](Dockerfile) for the defaults.
 
 ### Postfix variables
 
@@ -28,9 +119,9 @@ The image keeps Debian's `inet_protocols = ipv4`, so it neither accepts
 connections nor delivers mail over IPv6. Set `POSTFIX_inet_protocols=all` if
 your docker network has IPv6, or recipients you send to are IPv6 only.
 
-You can modify master.cf using postconf with `POSTFIXMASTER_` variables. All double `__` symbols will be replaced with `/`. For example
-
 ### Postfix master.cf variables
+
+You can modify master.cf using postconf with `POSTFIXMASTER_` variables. All double `__` symbols will be replaced with `/`. For example
 
 ```
 - POSTFIXMASTER_submission__inet=submission inet n - y - - smtpd
@@ -60,120 +151,13 @@ mydomain.com relay:[relay1.mydomain.com]:587
 ```
 and run `postmap /etc/postfix/transport`.
 
-### Relay Client Authentication
-The container includes [Postfix SASL](https://www.postfix.org/SASL_README.html) authentication options that are disabled by default.
-
-#### Example Basic Client PAM Auth
-First, create a passwd file.
-
-```
-echo "myuser:"`docker run --rm mwader/postfix-relay mkpasswd -m sha-512 "mypassword"` >> passwd_file
-```
-
-Then mount the passwd file and add the following postfix configs via enviromental variable.
-
-```
-volumes:
-  - /path/to/passwd_file:/etc/postfix/sasl/sasl_passwds
-environment:
-  - SASL_Passwds=/etc/postfix/sasl/sasl_passwds
-  - POSTFIX_smtpd_sasl_auth_enable=yes
-  - POSTFIX_cyrus_sasl_config_path=/etc/postfix/sasl
-  - POSTFIX_smtpd_sasl_security_options=noanonymous
-  - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
-```
-
-### Securing the relay
-
-The default configuration is an open relay that relies on docker networking for
-protection: anything that can reach port 25 can send mail through it, to
-anyone. That is fine while the port is only reachable from other containers on
-the same docker network, and it is why the port should not be published unless
-something outside docker really has to reach it.
-
-If it does, stop relaying for the whole world first, either by restricting who
-may relay by address:
-
-```
-environment:
-  # Whatever your docker network actually is
-  - POSTFIX_mynetworks=127.0.0.0/8,172.16.0.0/12
-```
-
-or by requiring authentication, using the setup described above and refusing
-everyone else:
-
-```
-environment:
-  - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
-```
-
-Clients that authenticate should also be able to do it over an encrypted
-connection, otherwise the password crosses the network in the clear. Mount a
-certificate and its key, and point postfix at them:
-
-```
-volumes:
-  - /your_local_path/cert.pem:/etc/postfix/tls/cert.pem:ro
-  - /your_local_path/key.pem:/etc/postfix/tls/key.pem:ro
-environment:
-  - POSTFIX_smtpd_tls_cert_file=/etc/postfix/tls/cert.pem
-  - POSTFIX_smtpd_tls_key_file=/etc/postfix/tls/key.pem
-  # "may" advertises STARTTLS, "encrypt" refuses clients that do not use it
-  - POSTFIX_smtpd_tls_security_level=may
-  # Never accept credentials over an unencrypted connection
-  - POSTFIX_smtpd_tls_auth_only=yes
-```
-
-Mail leaving the relay is already sent over TLS whenever the receiving server
-offers it (`POSTFIX_smtp_tls_security_level=may`). Set it to `encrypt` when
-relaying through a provider, where an unencrypted connection is a
-misconfiguration rather than the only option.
-
-#### What runs as root, and what to take away
-
-The container starts as root and cannot do otherwise: postfix refuses to run as
-anyone else (`the postfix command is reserved for the superuser`). It binds
-port 25, sets up its chroots and then drops privileges by itself, so what
-actually handles mail is not root:
-
-| Process | Runs as |
-| --- | --- |
-| the start-up script, `master`, `rsyslogd` | `root` |
-| `smtpd`, `cleanup`, `qmgr`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
-| `opendkim` | `opendkim` |
-| `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
-
-The root processes supervise and log; they do not parse untrusted input. Most
-of what docker grants the container by default is therefore unused and can be
-taken away:
-
-```
-cap_drop:
-  - ALL
-cap_add:
-  - CHOWN            # hand the queue to postfix and the DKIM keys to opendkim
-  - DAC_OVERRIDE     # read them back afterwards
-  - FOWNER           # set their modes
-  - NET_BIND_SERVICE # port 25, where docker does not already allow it
-  - SETGID           # the daemons dropping privileges
-  - SETUID
-  - SYS_CHROOT       # the jails they drop into
-security_opt:
-  - no-new-privileges
-```
-
-That leaves `AUDIT_WRITE`, `FSETID`, `KILL`, `MKNOD`, `NET_RAW`, `SETFCAP` and
-`SETPCAP` dropped, `NET_RAW` — raw sockets, and the packet spoofing that comes
-with them — being the one worth the trouble on a container that listens on a
-network. Relaying, signing, rewriting, the health check and a graceful stop all
-work with the set above, and a test checks that they do.
-
 ### OpenDKIM variables
 
 OpenDKIM [configuration options](http://opendkim.org/opendkim.conf.5.html) can be set
 using `OPENDKIM_<name>` environment variables. See [Dockerfile](Dockerfile) for default
 configuration. For example `OPENDKIM_Canonicalization=relaxed/simple`.
+
+Enabling signing itself is described in [DKIM](#dkim).
 
 ### PostSRSd variables
 
@@ -245,25 +229,166 @@ they come from `double-bounce@hostname`, a domain that does not resolve, and a
 receiver that rejects unknown sender domains will turn them away however good
 the recipient address is.
 
-### Using docker run
+### Timezone
+Wrong timestamps in log can be fixed by setting proper timezone.
+This parameter is handled by Debian base image.
+
 ```
-docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
+environment:
+  ...
+  - TZ=Europe/Prague
 ```
 
-### Using docker-compose
-```
-app:
-  # use hostname "smtp" as SMTP server
+<p align="right">(<a href="#top">back to top</a>)</p>
 
-smtp:
-  image: mwader/postfix-relay
-  restart: always
-  environment:
-    - POSTFIX_myhostname=smtp.domain.tld
-    - OPENDKIM_DOMAINS=smtp.domain.tld
+<!-- SECURING THE RELAY -->
+## Securing the relay
+
+The default configuration is an open relay that relies on docker networking for
+protection: anything that can reach port 25 can send mail through it, to
+anyone. That is fine while the port is only reachable from other containers on
+the same docker network, and it is why the port should not be published unless
+something outside docker really has to reach it.
+
+If it does, stop relaying for the whole world first, either by restricting who
+may relay by address:
+
+```
+environment:
+  # Whatever your docker network actually is
+  - POSTFIX_mynetworks=127.0.0.0/8,172.16.0.0/12
 ```
 
-### Volumes
+or by requiring authentication, using the setup described below and refusing
+everyone else:
+
+```
+environment:
+  - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
+```
+
+Clients that authenticate should also be able to do it over an encrypted
+connection, otherwise the password crosses the network in the clear. Mount a
+certificate and its key, and point postfix at them:
+
+```
+volumes:
+  - /your_local_path/cert.pem:/etc/postfix/tls/cert.pem:ro
+  - /your_local_path/key.pem:/etc/postfix/tls/key.pem:ro
+environment:
+  - POSTFIX_smtpd_tls_cert_file=/etc/postfix/tls/cert.pem
+  - POSTFIX_smtpd_tls_key_file=/etc/postfix/tls/key.pem
+  # "may" advertises STARTTLS, "encrypt" refuses clients that do not use it
+  - POSTFIX_smtpd_tls_security_level=may
+  # Never accept credentials over an unencrypted connection
+  - POSTFIX_smtpd_tls_auth_only=yes
+```
+
+Mail leaving the relay is already sent over TLS whenever the receiving server
+offers it (`POSTFIX_smtp_tls_security_level=may`). Set it to `encrypt` when
+relaying through a provider, where an unencrypted connection is a
+misconfiguration rather than the only option.
+
+### Client authentication
+The container includes [Postfix SASL](https://www.postfix.org/SASL_README.html) authentication options that are disabled by default.
+
+#### Example basic client PAM auth
+First, create a passwd file.
+
+```
+echo "myuser:"`docker run --rm mwader/postfix-relay mkpasswd -m sha-512 "mypassword"` >> passwd_file
+```
+
+Then mount the passwd file and add the following postfix configs via enviromental variable.
+
+```
+volumes:
+  - /path/to/passwd_file:/etc/postfix/sasl/sasl_passwds
+environment:
+  - SASL_Passwds=/etc/postfix/sasl/sasl_passwds
+  - POSTFIX_smtpd_sasl_auth_enable=yes
+  - POSTFIX_cyrus_sasl_config_path=/etc/postfix/sasl
+  - POSTFIX_smtpd_sasl_security_options=noanonymous
+  - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
+```
+
+### What runs as root, and what to take away
+
+The container starts as root and cannot do otherwise: postfix refuses to run as
+anyone else (`the postfix command is reserved for the superuser`). It binds
+port 25, sets up its chroots and then drops privileges by itself, so what
+actually handles mail is not root:
+
+| Process | Runs as |
+| --- | --- |
+| the start-up script, `master`, `rsyslogd` | `root` |
+| `smtpd`, `cleanup`, `qmgr`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
+| `opendkim` | `opendkim` |
+| `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
+
+The root processes supervise and log; they do not parse untrusted input. Most
+of what docker grants the container by default is therefore unused and can be
+taken away:
+
+```
+cap_drop:
+  - ALL
+cap_add:
+  - CHOWN            # hand the queue to postfix and the DKIM keys to opendkim
+  - DAC_OVERRIDE     # read them back afterwards
+  - FOWNER           # set their modes
+  - NET_BIND_SERVICE # port 25, where docker does not already allow it
+  - SETGID           # the daemons dropping privileges
+  - SETUID
+  - SYS_CHROOT       # the jails they drop into
+security_opt:
+  - no-new-privileges
+```
+
+That leaves `AUDIT_WRITE`, `FSETID`, `KILL`, `MKNOD`, `NET_RAW`, `SETFCAP` and
+`SETPCAP` dropped, `NET_RAW` — raw sockets, and the packet spoofing that comes
+with them — being the one worth the trouble on a container that listens on a
+network. Relaying, signing, rewriting, the health check and a graceful stop all
+work with the set above, and a test checks that they do.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- SPF AND DKIM -->
+## SPF and DKIM
+
+### SPF
+When sending email using your own SMTP server it is probably a good idea
+to setup [SPF](https://en.wikipedia.org/wiki/Sender_Policy_Framework) for the
+domain you're sending from.
+
+### DKIM
+To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail),
+specify a whitespace-separated list of domains in the environment variable
+`OPENDKIM_DOMAINS`. The default DKIM selector is "mail", but can be changed to
+"`<selector>`" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
+
+At container start, RSA key pairs will be generated for each domain unless the
+file `/etc/opendkim/keys/<domain>/<selector>.private` exists. If you want the
+keys to persist indefinitely, make sure to mount a volume for
+`/etc/opendkim/keys`, otherwise they will be destroyed when the container is
+removed.
+
+DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt` you should see something like this:
+```bash
+$ docker exec 7996454b5fca sh -c 'cat /etc/opendkim/keys/*/*.txt'
+
+mail._domainkey.smtp.domain.tld. IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
+	  "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Dx7wLGPFVaxVQ4TGym/eF89aQ8oMxS9v5BCc26Hij91t2Ci8Fl12DHNVqZoIPGm+9tTIoDVDFEFrlPhMOZl8i4jU9pcFjjaIISaV2+qTa8uV1j3MyByogG8pu4o5Ill7zaySYFsYB++cHJ9pjbFSC42dddCYMfuVgrBsLNrvEi3dLDMjJF5l92Uu8YeswFe26PuHX3Avr261n"
+	  "j5joTnYwat4387VEUyGUnZ0aZxCERi+ndXv2/wMJ0tizq+a9+EgqIb+7lkUc2XciQPNuTujM25GhrQBEKznvHyPA6fHsFheymOuB763QpkmnQQLCxyLygAY9mE/5RY+5Q6J9oDOQIDAQAB" )  ; ----- DKIM key mail for smtp.domain.tld
+```
+
+Other OpenDKIM options are set with the `OPENDKIM_<name>` variables described in
+[OpenDKIM variables](#opendkim-variables).
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- VOLUMES -->
+## Volumes
 The image declares volumes for the two directories holding state that cannot be
 recreated:
 
@@ -296,7 +421,10 @@ singleton lock lives in `/var/lib/postfix` rather than in the queue, so nothing
 prevents two masters from working on one queue and duplicating or corrupting
 mail.
 
-### Logging
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- LOGGING -->
+## Logging
 By default container only logs to stdout. If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
 
 ```
@@ -320,11 +448,14 @@ environment:
   - RSYSLOG_REMOTE_TEMPLATE=RSYSLOG_ForwardFormat
 ```
 
-#### Advanced logging configuration
+### Advanced logging configuration
 
 If configuration via environment variables is not flexible enough it's possible to configure rsyslog directly: `.conf` files in the `/etc/rsyslog.d` directory will be [sorted alphabetically](https://www.rsyslog.com/doc/v8-stable/rainerscript/include.html#file) and included into the primary configuration.
 
-### Health check
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- HEALTH CHECK -->
+## Health check
 
 The image ships a `HEALTHCHECK`, so `docker ps` reports whether the relay is
 actually able to work. It covers every daemon the container started, not only
@@ -345,19 +476,12 @@ mail without the signing or rewriting that was configured, and a daemon that
 later gives up on its own exits the container non-zero, so `restart:
 on-failure` brings it back.
 
-### Timezone
-Wrong timestamps in log can be fixed by setting proper timezone.
-This parameter is handled by Debian base image.
+<p align="right">(<a href="#top">back to top</a>)</p>
 
-```
-environment:
-  ...
-  - TZ=Europe/Prague
-```
+<!-- TROUBLESHOOTING -->
+## Troubleshooting
 
-### Known issues
-
-#### I see `key data is not secure: /etc/opendkim/keys can be read or written by other users` error messages.
+### I see `key data is not secure: /etc/opendkim/keys can be read or written by other users` error messages.
 
 Some Docker distributions like Docker for Windows and RancherOS seems to handle
 volume permission in way that does not work with OpenDKIM default behavior of
@@ -365,32 +489,9 @@ ensuring safe permissions on private keys.
 
 A workaround is to disable the check using a `OPENDKIM_RequireSafeKeys=no` environment variable.
 
-## SPF
-When sending email using your own SMTP server it is probably a good idea
-to setup [SPF](https://en.wikipedia.org/wiki/Sender_Policy_Framework) for the
-domain you're sending from.
+<p align="right">(<a href="#top">back to top</a>)</p>
 
-## DKIM
-To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail),
-specify a whitespace-separated list of domains in the environment variable
-`OPENDKIM_DOMAINS`. The default DKIM selector is "mail", but can be changed to
-"`<selector>`" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
-
-At container start, RSA key pairs will be generated for each domain unless the
-file `/etc/opendkim/keys/<domain>/<selector>.private` exists. If you want the
-keys to persist indefinitely, make sure to mount a volume for
-`/etc/opendkim/keys`, otherwise they will be destroyed when the container is
-removed.
-
-DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt` you should see something like this:
-```bash
-$ docker exec 7996454b5fca sh -c 'cat /etc/opendkim/keys/*/*.txt'
-
-mail._domainkey.smtp.domain.tld. IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
-	  "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Dx7wLGPFVaxVQ4TGym/eF89aQ8oMxS9v5BCc26Hij91t2Ci8Fl12DHNVqZoIPGm+9tTIoDVDFEFrlPhMOZl8i4jU9pcFjjaIISaV2+qTa8uV1j3MyByogG8pu4o5Ill7zaySYFsYB++cHJ9pjbFSC42dddCYMfuVgrBsLNrvEi3dLDMjJF5l92Uu8YeswFe26PuHX3Avr261n"
-	  "j5joTnYwat4387VEUyGUnZ0aZxCERi+ndXv2/wMJ0tizq+a9+EgqIb+7lkUc2XciQPNuTujM25GhrQBEKznvHyPA6fHsFheymOuB763QpkmnQQLCxyLygAY9mE/5RY+5Q6J9oDOQIDAQAB" )  ; ----- DKIM key mail for smtp.domain.tld
-```
-
+<!-- TESTING -->
 ## Testing
 
 This project uses [testcontainers](https://testcontainers.com/) with [pytest](https://docs.pytest.org/) for integration testing.
@@ -440,6 +541,11 @@ the shared `postfix` fixture instead.
 When a test fails, the log of the containers it used is part of the pytest
 output.
 
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- LICENSE -->
 ## License
 postfix-relay is licensed under the MIT license. See [LICENSE](LICENSE) for the
 full license text.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
