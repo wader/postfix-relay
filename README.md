@@ -533,6 +533,7 @@ postfix setting.
 | `test_logging.py` | What the container logs, and where the `RSYSLOG_` variables send it |
 | `test_healthcheck.py` | The health check, against relays with a daemon taken away |
 | `test_lifecycle.py` | Starting, restarting, stopping, and the mail that is in the queue meanwhile |
+| `test_capabilities.py` | Relaying with everything docker grants by default taken away but the documented set |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and
@@ -549,7 +550,8 @@ def test_signing(postfix_shared, mailpit):
 
 Both take `env`, `files` for the configuration that is mounted rather than
 set through the environment, and `ports`; `postfix_factory` also takes
-`volumes` for the state the image keeps across containers. Starting a
+`volumes` for the state the image keeps across containers and `kwargs` for
+what has to be said to docker itself. Starting a
 container is most of what the suite costs: `postfix_shared` starts one per
 configuration and keeps it for the whole run, so it is the one to reach for
 unless the test kills a daemon, edits a file or restarts the container.
