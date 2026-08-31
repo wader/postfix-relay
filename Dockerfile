@@ -3,11 +3,19 @@ LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com
 
 # postsrsd is optional and only installed where Debian builds it: it is missing
 # for armhf in trixie, which is the linux/arm/v7 image.
+# perl is spelled out for qshape, which ships in the postfix package but is a
+# perl script needing File::Find, and which postfix names in no dependency of
+# its own. It is in the image today only because opendkim-tools depends on
+# perl:any, which perl-base cannot satisfy -- none of opendkim's own scripts
+# needs more than perl-base, so that dependency could correctly be narrowed and
+# take qshape down with it on a routine base bump. Naming it here costs nothing
+# now and keeps that from happening.
 RUN \
   apt-get update && \
   apt-get -y --no-install-recommends install \
     procps \
     postfix \
+    perl \
     libsasl2-modules \
     libpam-pwdfile \
     sasl2-bin \
