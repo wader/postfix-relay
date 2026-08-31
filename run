@@ -1,20 +1,35 @@
 #!/bin/bash
 
-# "service ... start" returns as soon as start-stop-daemon has forked, so a
-# daemon that dies on its configuration does so after a successful start. Wait
-# for it to be there, rather than relaying mail without the signing or the
-# rewriting the container was asked for.
-startService()
-{
-    local name="$1" process="$2" try
+# Every daemon this configuration needs, filled in as each one is started and
+# watched by the supervision loop at the end. Kept here rather than derived
+# from the environment a second time: what was started is what has to stay up.
+supervised=""
 
-    service "$name" start
+# "service ... start" returns as soon as start-stop-daemon has forked and
+# saslauthd daemonises itself, so a daemon that dies on its configuration does
+# so after a successful start. Wait for it to be there, rather than relaying
+# mail without the signing or the rewriting the container was asked for.
+awaitProcess()
+{
+    local process="$1" try
+
     for try in 1 2 3 4 5 ; do
       if pgrep -x "$process" > /dev/null ; then
-        return
+        supervised="$supervised $process"
+        return 0
       fi
       sleep 0.2
     done
+
+    return 1
+}
+
+startService()
+{
+    local name="$1" process="$2"
+
+    service "$name" start
+    awaitProcess "$process" && return
 
     echo "$name did not start, refusing to relay without it." >&2
     exit 1
@@ -219,7 +234,24 @@ for e in ${!OPENDKIM_*} ; do
   echo "${e:9} ${!e}" >> /etc/opendkim.conf
 done
 
-trap "stopping=1; service postfix stop; service opendkim stop; service postsrsd stop; pkill -TERM rsyslogd; pkill -TERM saslauthd" SIGTERM SIGINT
+# Stop everything this script started, on either way out: the container being
+# stopped, or this script giving up on a daemon that is gone. rsyslogd is
+# signalled last and waited for, so that what the others write on their way out
+# still reaches the container log.
+stopDaemons()
+{
+    [ -n "$stopped" ] && return
+    stopped=1
+
+    service postfix stop
+    service opendkim stop
+    service postsrsd stop
+    pkill -TERM saslauthd
+    pkill -TERM rsyslogd
+    wait "$rsyslogPid" 2> /dev/null
+}
+
+trap 'stopping=1 ; stopDaemons' SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
   startService opendkim opendkim
@@ -272,6 +304,10 @@ EOF
   install -d -o root -g sasl -m 710 /var/spool/postfix/var/run/saslauthd
 
   saslauthd -c -r -a pam -m /var/spool/postfix/var/run/saslauthd &
+  awaitProcess saslauthd || {
+    echo "saslauthd did not start, refusing to relay without it." >&2
+    exit 1
+  }
 fi
 
 startService postfix master
@@ -313,14 +349,41 @@ EOF
 fi
 
 rsyslogd -n &
-wait
+rsyslogPid=$!
+supervised="$supervised rsyslogd"
 
-# Reaching this without having been signalled means a daemon started here gave
-# up on its own. Exiting 0 would look like a clean stop and leave an
-# on-failure restart policy with nothing to act on.
-if [ -z "$stopping" ] ; then
-  echo "A daemon exited on its own, stopping the relay." >&2
-  exit 1
-fi
+# rsyslogd is the only one of them that is a child of this script, so the bare
+# "wait" this replaces was watching one daemon out of five and the container
+# went on relaying when any of the other four died (issue #176). Polling
+# "pgrep -x", the way the health check does, watches all of them and needs
+# nothing beyond reading /proc -- signalling a daemon that dropped to its own
+# user would need a capability the README asks deployments to drop.
+while [ -z "$stopping" ] ; do
+  # The sleep runs in the background and is waited for: "wait" is interrupted
+  # by a trapped signal, while a foreground "sleep" would postpone the stop by
+  # a whole interval. "-n" returns on whichever finishes first, so rsyslogd --
+  # the one daemon that is still a job of this shell -- is noticed the moment
+  # it dies rather than at the end of the interval.
+  sleep 2 &
+  wait -n
+  [ -n "$stopping" ] && break
+
+  for daemon in $supervised ; do
+    pgrep -x "$daemon" > /dev/null && continue
+
+    # A daemon takes a moment to actually go away, and a relay that is fine is
+    # not worth stopping over a single missed reading.
+    sleep 1 &
+    wait $!
+    [ -n "$stopping" ] && break 2
+    pgrep -x "$daemon" > /dev/null && continue
+
+    # Exiting 0 would look like a clean stop and leave an on-failure restart
+    # policy with nothing to act on.
+    echo "A daemon exited on its own, stopping the relay: $daemon is gone." >&2
+    stopDaemons
+    exit 1
+  done
+done
 
 exit 0
