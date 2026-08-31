@@ -14,6 +14,7 @@ jobs:
   event_file:
     name: "Event File"
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
     - name: Upload
       uses: actions/upload-artifact@v7
@@ -23,6 +24,10 @@ jobs:
   docker:
     name: "Pytest"
     runs-on: ubuntu-latest
+    # Backstop only. Exceeding a job timeout cancels the job, and a cancelled
+    # job does not run the upload below, so the bound that is expected to fire
+    # is on the test step instead: it fails, and the results still get reported.
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -37,6 +42,10 @@ jobs:
         run: pip install -r tests/requirements.txt
       
       - name: Run tests
+        # The suite builds the image and then takes a few minutes; every wait
+        # in it is already bounded, so overrunning this by much means something
+        # is stuck rather than slow.
+        timeout-minutes: 15
         run: pytest --junitxml=junit/test-results.xml
       
       - name: Upload Test Results
