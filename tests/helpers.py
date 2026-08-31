@@ -2,7 +2,14 @@ import re
 import smtplib
 import time
 
+import docker
+import requests
+
 DEFAULT_TIMEOUT = 30
+
+# Docker runs its DNS resolver on this address inside every container
+# attached to a user defined network.
+DOCKER_RESOLVER = "127.0.0.11"
 
 
 def poll_until(predicate, timeout=DEFAULT_TIMEOUT, description="condition"):
@@ -122,3 +129,104 @@ def restart(container, port=25):
     """Restart the container and wait for it to accept mail again."""
     container.get_wrapped_container().restart()
     wait_for_smtp(container, port=port)
+
+
+def send_raw(container, message, sender="sender@example.com",
+             recipients=("receiver@example.com",), port=25):
+    """Hand a message to the relay exactly as written, envelope included.
+
+    "send" composes the message from its parts, which is what most tests
+    want; this one is for the tests that are about the bytes themselves.
+    """
+    with smtp_connect(container, port) as smtp:
+        smtp.sendmail(sender, list(recipients), message)
+
+
+def image_config(container_image):
+    """The image configuration, as "docker inspect" reports it.
+
+    What a user gets before setting anything: the declared volumes, the
+    exposed port, the health check and the environment defaults the README
+    points at the Dockerfile for.
+    """
+    return docker.from_env().images.get(container_image).attrs['Config']
+
+
+def image_run(container_image, command):
+    """Run a command in a throwaway container and return its output.
+
+    The image ships tools the README tells users to run that way, mkpasswd
+    for one, and it is the cheapest way to look inside it: no relay has to
+    be started for a question about a file.
+    """
+    return docker.from_env().containers.run(
+        container_image, command, remove=True).decode()
+
+
+def mkpasswd(container_image, password):
+    """Hash a password the way the README tells users to.
+
+    "docker run --rm <image> mkpasswd -m sha-512 <password>", which is what
+    the PAM password file the relay authenticates against is built from.
+    """
+    return image_run(container_image, ["mkpasswd", "-m", "sha-512", password]).strip()
+
+
+def file_missing(container, path):
+    """Whether a path is absent from the container."""
+    return container.exec(["test", "-e", path]).exit_code != 0
+
+
+def listening_ports(container):
+    """The TCP ports something inside the container is listening on."""
+    return {port for _, port in listening_sockets(container)}
+
+
+def listening_sockets(container):
+    """The (address, port) pairs something inside the container listens on.
+
+    Read from the kernel, the way the health check does, so a daemon that
+    was never asked for is noticed by the socket it opened rather than only
+    by its process name.
+
+    Docker's embedded DNS resolver listens inside every container attached
+    to a user defined network; it belongs to docker rather than to the
+    image, so it is left out.
+    """
+    sockets = set()
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        result = container.exec(["cat", path])
+        if result.exit_code != 0:
+            continue
+        for line in result.output.decode().splitlines()[1:]:
+            fields = line.split()
+            # State 0A is listening, and the local address is "address:port".
+            if len(fields) < 4 or fields[3] != '0A':
+                continue
+            address, port = fields[1].split(':')
+            address = _dotted_quad(address) or address
+            if address == DOCKER_RESOLVER:
+                continue
+            sockets.add((address, int(port, 16)))
+    return sockets
+
+
+def _dotted_quad(hex_address):
+    """"0B00007F" -> "127.0.0.11", the byte order /proc/net/tcp writes."""
+    if len(hex_address) != 8:
+        return None
+    return '.'.join(str(int(hex_address[index:index + 2], 16))
+                    for index in range(6, -2, -2))
+
+
+def exit_code_within(container, seconds=15):
+    """The code the container exited with, or None if it is still running.
+
+    docker's wait endpoint has no notion of "not yet": asking it to wait
+    less than the container takes raises a read timeout, which is the
+    answer rather than an error here.
+    """
+    try:
+        return container.get_wrapped_container().wait(timeout=seconds)['StatusCode']
+    except requests.exceptions.RequestException:
+        return None

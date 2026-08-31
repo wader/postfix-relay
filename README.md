@@ -534,29 +534,54 @@ deactivate
 
 The tests build the image and run it, so what they check is the image
 itself: mail is sent to a container and what comes out of it is read back
-from mailpit. Each `tests/test_*.py` file covers one area, relaying, the
-defaults, configuration variables, DKIM, SASL, SRS, logging and the
-container lifecycle, `tests/fixtures` has the containers and
-`tests/helpers.py` the few things tests keep doing, like waiting for a mail
-or reading back a postfix setting.
+from mailpit. `tests/fixtures` has the containers and `tests/helpers.py`
+the few things tests keep doing, like waiting for a mail or reading back a
+postfix setting.
 
-Use the `postfix` fixture for a relay with the default configuration, and
-`postfix_factory` when a test needs its own:
+| File | What it covers |
+| --- | --- |
+| `test_image.py` | The published image before anything runs: the defaults from the Dockerfile, the declared volumes, the exposed port, the health check, the programs the README has users run out of it |
+| `test_defaults.py` | What a relay that is told nothing but where to send does, and the daemons it does not start |
+| `test_smtp.py` | The SMTP conversation itself, and that the message handed over is the message that was given |
+| `test_sendmail.py` | Whole messages, with their parts, their attachments and their envelope |
+| `test_config.py` | `POSTFIX_`, `POSTFIXMASTER_` and `POSTMAP_` variables, from the variable to what postfix does |
+| `test_dkim.py` | Signing: the keys, the records to publish, and signatures that verify |
+| `test_srs.py` | Envelope sender rewriting, and reversing it again |
+| `test_sasl.py` | Clients authenticating to the relay, and the relay authenticating to its next hop |
+| `test_client_tls.py` | Encrypting client connections, as the "Securing the relay" section documents it |
+| `test_postmaster.py` | Where postfix's reports about itself go, up to the notice arriving |
+| `test_logging.py` | What the container logs, and where the `RSYSLOG_` variables send it |
+| `test_healthcheck.py` | The health check, against relays with a daemon taken away |
+| `test_lifecycle.py` | Starting, restarting, stopping, and the mail that is in the queue meanwhile |
+| `test_capabilities.py` | Relaying with everything docker grants by default taken away but the documented set |
+
+Use the `postfix` fixture for a relay with the default configuration,
+`postfix_shared` for a configuration several tests read the same way, and
+`postfix_factory` when a test changes the container it is given:
 
 ```python
-def test_signing(postfix_factory, mailpit):
-    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com'})
+def test_signing(postfix_shared, mailpit):
+    relay = postfix_shared(env={'OPENDKIM_DOMAINS': 'example.com'})
 
     send(relay, sender='sender@example.com', subject='signed')
 
     assert 'dkim-signature' in mailpit.wait_for_message('signed')['headers']
 ```
 
-`postfix_factory` also takes `files` for the configuration that is mounted
-rather than set through the environment, and `volumes` for the state the
-image keeps across containers. Every call starts a container, which is most
-of what the suite costs, so a test that only needs the defaults should use
-the shared `postfix` fixture instead.
+Both take `env`, `files` for the configuration that is mounted rather than
+set through the environment, and `ports`; `postfix_factory` also takes
+`volumes` for the state the image keeps across containers and `kwargs` for
+what has to be said to docker itself. Starting a
+container is most of what the suite costs: `postfix_shared` starts one per
+configuration and keeps it for the whole run, so it is the one to reach for
+unless the test kills a daemon, edits a file or restarts the container.
+
+A defect that is understood but not fixed yet is covered by a test that
+asserts the behaviour there should be, marked `xfail(strict=True)` with the
+issue it belongs to. The run stays green while the defect
+is open, and the day it is fixed the strict marker turns the now passing
+test red until the marker is removed, so the coverage is never quietly
+lost.
 
 When a test fails, the log of the containers it used is part of the pytest
 output.
