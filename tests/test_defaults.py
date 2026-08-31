@@ -8,8 +8,10 @@ turning one of them on by accident would change all of them at once.
 These tests share the default relay, so they cost no extra container.
 """
 
+import re
+
 from tests.helpers import (esmtp_features, listening_ports, postconf,
-                           process_running, send)
+                           process_running, send, wait_for_log)
 
 
 def test_the_banner_announces_myhostname(postfix):
@@ -40,6 +42,25 @@ def test_clients_are_offered_no_encryption(postfix):
 def test_mail_leaving_the_relay_still_uses_encryption_when_offered(postfix):
     """The other half of the same trade-off: only the client side is plain."""
     assert postconf(postfix, 'smtp_tls_security_level') == 'may'
+
+
+def test_mail_leaving_the_relay_is_actually_encrypted(postfix_factory, mailpit):
+    """And the setting above is not just stored: the handshake happens.
+
+    smtp_tls_loglevel is raised only to make the connection observable, since
+    postfix says nothing about it otherwise. The security level being exercised
+    is the image default.
+    """
+    relay = postfix_factory(env={'POSTFIX_smtp_tls_loglevel': '1'})
+
+    assert postconf(relay, 'smtp_tls_security_level') == 'may'
+
+    send(relay, subject='over tls')
+    mailpit.wait_for_message('over tls')
+
+    log = wait_for_log(relay, 'TLS connection established to mailpit')
+
+    assert re.search(r'TLS connection established to mailpit\[[\d.]+\]:1025: TLSv1', log), log
 
 
 def test_clients_are_offered_no_authentication(postfix):

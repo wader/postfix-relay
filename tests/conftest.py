@@ -19,8 +19,14 @@ def print_log_on_failure(request, name, container):
     report = getattr(request.node, "report_call", None)
     if report is None or not report.failed:
         return
+    stdout, stderr = container.get_logs()
     print(f"----- {name} log -----")
-    print(container.get_logs()[0].decode())
+    print(stdout.decode())
+    # "run" reports what stopped it on stderr, which is all a container that
+    # refused to start has to say.
+    if stderr:
+        print(f"----- {name} stderr -----")
+        print(stderr.decode())
 
 
 @pytest.fixture(autouse=True)
