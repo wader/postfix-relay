@@ -489,6 +489,22 @@ ensuring safe permissions on private keys.
 
 A workaround is to disable the check using a `OPENDKIM_RequireSafeKeys=no` environment variable.
 
+### I set `user:` in my compose file and the container fails with `/bin/bash: /root/run: Permission denied`.
+
+The container has to start as root. `/root` is `0700` and the entrypoint lives
+there, so another user cannot even read the script — the message reads like a
+broken file mode, but it is the intended one. A readable entrypoint would not
+get much further: postfix refuses to run as anyone else, with `the postfix
+command is reserved for the superuser`. See
+[What runs as root, and what to take away](#what-runs-as-root-and-what-to-take-away)
+for what the root processes do, and for the capabilities to drop instead.
+
+Setting `user:` to avoid ownership surprises on mounted directories does not
+help either: whatever `user:` says, the container hands the DKIM keys to
+`opendkim` and the queue to `postfix` on every start, because that is what
+those daemons require. Mount the directories and let the container set them
+up; on the host they will show the uids those daemons have inside it.
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- TESTING -->
