@@ -118,14 +118,23 @@ srsConfig()
     fi
     chmod a=,u=rw /etc/postsrsd.secret
 
-    # POSTSRSD_var env -> put "var=value" line in /etc/default/postsrsd.
+    # POSTSRSD_var env -> put "var='value'" line in /etc/default/postsrsd.
     # The file is sourced by the init script, so appending overrides the
     # packaged defaults. The block is regenerated to stay idempotent when a
     # container is restarted.
+    #
+    # The value is single quoted because that init script is /bin/sh with
+    # "set -e": unquoted, a value with a space in it is read as an assignment
+    # followed by a command, and the command not being found takes the init
+    # script down with it (issue #177). Embedded single quotes are closed,
+    # escaped and reopened, which is what the replacement below does. Only the
+    # assignment is quoted: the init script still splits the value into words
+    # when it builds the daemon arguments, so SRS_EXTRA_OPTIONS='-A -t60'
+    # still reaches postsrsd as two options.
     sed -i "/$srsMarker/,\$d" /etc/default/postsrsd
     echo "$srsMarker" >> /etc/default/postsrsd
     for e in ${!POSTSRSD_*} ; do
-      echo "${e:9}=${!e}" >> /etc/default/postsrsd
+      printf "%s='%s'\n" "${e:9}" "${!e//\'/\'\\\'\'}" >> /etc/default/postsrsd
     done
 
     # Point postfix at postsrsd, unless the user configured the maps

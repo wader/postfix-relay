@@ -83,7 +83,7 @@ def test_secret_and_configuration_survive_a_restart(srs_relay, mailpit):
     # The file is sourced, so the last assignment is the one that counts: the
     # packaged SRS_DOMAIN=localdomain has to stay above ours.
     domains = [line for line in defaults.splitlines() if line.startswith('SRS_DOMAIN=')]
-    assert domains[-1] == f'SRS_DOMAIN={SRS_DOMAIN}'
+    assert domains[-1] == f"SRS_DOMAIN='{SRS_DOMAIN}'"
 
     send(srs_relay, sender='sender@example.com', subject='rewritten after restart')
 
@@ -210,22 +210,30 @@ def test_several_domains_can_be_excluded_at_once(postfix_shared, mailpit):
 
 
 def test_every_postsrsd_variable_reaches_the_daemon(postfix_shared):
-    """The generated block is what /etc/default/postsrsd is read for."""
+    """The generated block is what /etc/default/postsrsd is read for.
+
+    Read back the way the init script reads it -- by sourcing the file with
+    /bin/sh -- rather than by matching the text: what has to hold is the
+    value the daemon is started with, not how it was quoted on the way in.
+    """
     relay = postfix_shared(env={
         'POSTSRSD_SRS_DOMAIN': SRS_DOMAIN,
         'POSTSRSD_SRS_HASHLENGTH': '8',
         'POSTSRSD_SRS_HASHMIN': '6',
     })
 
+    sourced = container_exec(relay, [
+        "sh", "-c", ". /etc/default/postsrsd ; "
+                    'printf "%s|%s|%s" "$SRS_DOMAIN" "$SRS_HASHLENGTH" "$SRS_HASHMIN"'])
+
+    assert sourced == f'{SRS_DOMAIN}|8|6'
+    # And the block is the only place they come from, so it is regenerated
+    # rather than appended to a second time.
     generated = container_exec(relay, ["cat", "/etc/default/postsrsd"]).split(
         GENERATED_MARKER)[1]
-
-    assert sorted(generated.split()) == [
-        f'SRS_DOMAIN={SRS_DOMAIN}', 'SRS_HASHLENGTH=8', 'SRS_HASHMIN=6']
+    assert len(generated.split()) == 3
 
 
-@pytest.mark.xfail(reason="see issue #177: the value is written unquoted into a "
-                          "file the init script sources", strict=True)
 def test_a_setting_that_needs_a_space_can_be_passed_through(postfix_factory):
     """postsrsd's own extra options are documented as a list.
 
