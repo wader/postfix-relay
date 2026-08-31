@@ -369,6 +369,30 @@ environment:
   - POSTFIX_smtpd_relay_restrictions=permit_sasl_authenticated,reject
 ```
 
+#### Bringing your own SASL configuration
+
+The example above authenticates against a passwd file because that is what the
+image sets up when you give it nothing else. `/etc/postfix/sasl/smtpd.conf` and
+`/etc/pam.d/smtp` are written at start-up **only when they do not already
+exist**, so mounting either one replaces it and leaves the rest of the setup
+alone. That is how the relay is pointed at something other than a passwd file,
+and how the offered mechanisms are narrowed:
+
+```
+volumes:
+  - /your_local_path/smtpd.conf:/etc/postfix/sasl/smtpd.conf
+  - /your_local_path/pam_smtp:/etc/pam.d/smtp
+```
+
+The generated `smtpd.conf` offers `CRAM-MD5 DIGEST-MD5 LOGIN PLAIN`; a mounted
+one saying `mech_list: PLAIN` is what the relay then advertises.
+
+`SASL_Passwds` still has to be set to something non-empty, whatever those files
+contain. It is what switches the whole SASL block on, and `saslauthd` is started
+inside it, so leaving it empty means no authentication daemon at all. Its value
+is only read as a path by the *generated* PAM profile, so once you mount your
+own it no longer has to point at a passwd file.
+
 ### What runs as root, and what to take away
 
 The container starts as root and cannot do otherwise: postfix refuses to run as
