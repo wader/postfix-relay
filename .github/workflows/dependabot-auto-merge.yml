@@ -1,0 +1,42 @@
+# Auto-merge Dependabot pull requests for minor and patch updates once
+# required checks pass. Major updates are left for human review.
+#
+# Requirements:
+# - "Allow auto-merge" enabled in the repository settings
+# - a ruleset on master with required status checks, otherwise auto-merge
+#   does not wait for CI and merges straight away
+#
+# Required checks are matched by job name, not by workflow name. The names
+# that exist are "Build Image", "Pytest", "Event File" and "Test Results";
+# "ci" and "test" are workflows and never report a check of their own.
+
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for minor and patch updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-minor' || steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        run: gh pr merge --auto --merge "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          # GITHUB_TOKEN works out of the box, but a merge performed with it
+          # does not trigger the on:push ci workflow on master, so :latest is
+          # not rebuilt until the next push. To get that rebuild, store a PAT
+          # as a *Dependabot* secret (Settings > Secrets > Dependabot) and use
+          # it here instead.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

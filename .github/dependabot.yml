@@ -1,0 +1,43 @@
+# Automatic dependency update pull requests
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#
+# tests/requirements.txt pins no versions, so a pip ecosystem would have
+# nothing to bump and is left out.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Minor and patch bumps are grouped into a single PR that the
+      # dependabot-auto-merge workflow merges once CI passes
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      # Major bumps can contain breaking changes, keep them in a separate
+      # PR that waits for human review
+      actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+  # Base image of the Dockerfile, replacing wader/bump. Daily, to keep the
+  # cadence bump.yml had.
+  #
+  # Dependabot only offers tags matching the shape of the current one, so
+  # 'trixie-<date>-slim' stays on trixie and stays slim, the way the
+  # '/^trixie-.*-slim/' filter in the old bump comment did. A suite change
+  # (trixie -> forky) is a deliberate edit, as it was with bump.
+  #
+  # A date is not a semver minor or patch, so these never match the
+  # auto-merge rule below and always wait for review, like bump's PRs did.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
