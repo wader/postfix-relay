@@ -287,15 +287,13 @@ def test_the_upstream_password_never_reaches_the_log(postfix_shared):
     assert 'relaypass' not in container_log(relay)
 
 
-@pytest.mark.xfail(reason="see issue #178: the table is written with the default "
-                          "umask, so every user in the container can read it",
-                   strict=True)
 def test_the_upstream_password_is_not_readable_by_every_user(postfix_shared):
-    """It is a third party account's password in clear text.
+    """Regression test for issue #178.
 
-    The DKIM keys and the SRS secret are both tightened to 600 on start-up;
-    this file is the one that holds a password someone else issued, and
-    opendkim -- which parses whatever a stranger sent -- can read it.
+    It is a third party account's password in clear text. The DKIM keys and
+    the SRS secret were both tightened to 600 on start-up, while this file --
+    the one holding a password someone else issued -- was left at the default
+    umask, readable by opendkim, which parses whatever a stranger sent.
     """
     relay = postfix_shared(env=UPSTREAM_CREDENTIALS)
 
