@@ -509,6 +509,30 @@ help either: whatever `user:` says, the container hands the DKIM keys to
 those daemons require. Mount the directories and let the container set them
 up; on the host they will show the uids those daemons have inside it.
 
+### Mail is piling up and I want to know what the queue is doing.
+
+Two tools, answering different questions. `qshape` says *which destination owns
+the queue, and since when*: destinations down the side, message age in minutes
+across the top, doubling each column.
+
+```
+docker exec <container> qshape          # incoming and active
+docker exec <container> qshape deferred # what has already failed once
+```
+
+Weight in the young columns on the left is a problem happening now; everything
+in `1280+` is old mail nobody is retrying hard. That ranking is worth most when
+mail leaves by `transport_maps` to several places -- with a single
+`POSTFIX_relayhost` every message shares one next hop, so the domain axis
+describes your senders rather than the fault.
+
+`postqueue -j` says *why*, which `qshape` never sees: one JSON object per queue
+file, carrying `delay_reason` and `bounce_reason` per recipient.
+
+```
+docker exec <container> postqueue -j | jq -r '.recipients[].delay_reason' | sort | uniq -c
+```
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- TESTING -->
