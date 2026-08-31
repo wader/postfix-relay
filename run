@@ -154,6 +154,15 @@ rm -f \
   /run/rsyslogd.pid \
   /var/spool/postfix/pid/master.pid
 
+# A queue mounted from a host directory hides /var/spool/postfix/dev, which
+# ships in the image, empty, and is where rsyslog opens the log socket the
+# chrooted postfix daemons write to. Nothing else recreates it: it has no entry
+# in postfix-files, so "postfix check" does not, and Debian's chroot resync
+# only fills etc/, lib/ and usr/lib/sasl2. Without it rsyslogd reports it
+# cannot create the socket and everything that connects to syslog after
+# chrooting is logged nowhere (issue #180).
+mkdir -p /var/spool/postfix/dev
+
 secretsFromFiles
 
 # POSTMASTER_ADDRESS env -> route postfix's own notifications (notify_classes)
