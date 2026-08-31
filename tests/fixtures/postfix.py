@@ -27,12 +27,14 @@ def postfix_image():
 
 
 def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
-           wait_ready=True, kwargs=None):
+           command=None, wait_ready=True, kwargs=None):
     container = DockerContainer(image=image) \
         .with_network(network) \
         .with_network_aliases(alias or f"postfix-{next(_alias_numbers)}") \
         .with_env('POSTFIX_relayhost', 'mailpit:1025')
 
+    if command is not None:
+        container.with_command(command)
     for port in ports:
         container.with_exposed_ports(port)
     for name, path in (volumes or {}).items():
@@ -80,16 +82,18 @@ def postfix_factory(postfix_image, shared_network, request):
     configuration that is documented as mounted instead of set through
     environment variables. "volumes" maps a docker volume name to a path, for
     the state the image is documented to keep across containers.
-    "wait_ready" can be turned off for containers that are not expected to
-    come up at all, and "kwargs" is passed to docker as is.
+    "command" replaces the image's own, for the few tests that have to stand
+    the image up differently from the way it ships. "wait_ready" can be turned
+    off for containers that are not expected to come up at all, and "kwargs" is
+    passed to docker as is.
     """
     started = []
 
-    def start(env=None, files=None, volumes=None, ports=(25,), alias=None, wait_ready=True,
-              kwargs=None):
+    def start(env=None, files=None, volumes=None, ports=(25,), alias=None, command=None,
+              wait_ready=True, kwargs=None):
         container = _start(postfix_image, shared_network, env=env, files=files,
-                           volumes=volumes, ports=ports, alias=alias, wait_ready=wait_ready,
-                           kwargs=kwargs)
+                           volumes=volumes, ports=ports, alias=alias, command=command,
+                           wait_ready=wait_ready, kwargs=kwargs)
         started.append(container)
         return container
 

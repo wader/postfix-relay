@@ -1,5 +1,12 @@
-dkimpy
-pytest
-requests
-testcontainers
-testcontainers[mailpit]
+# Pinned so that a release of one of these cannot turn a green branch red on
+# its own: CI installs them fresh on every run, and the module the mailpit
+# fixtures import has already been renamed once.
+#
+# These are the packages tests/ imports by name. Their own dependencies are
+# not pinned, so a transitive release can still break a run; closing that would
+# need a lock file and something to keep it current.
+dkimpy==1.1.8
+docker==7.2.0
+pytest==9.1.1
+requests==2.34.2
+testcontainers[mailpit]==4.15.0
