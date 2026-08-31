@@ -100,9 +100,9 @@ def test_authentication_still_works_after_a_restart(restartable_authenticated_re
                                                     mailpit):
     """The second start must not leave the relay unable to authenticate anyone.
 
-    Setting SASL up is not idempotent on the face of it: the statoverride is
-    already registered and postfix is already in the sasl group, and neither
-    failing stops the rest of the script.
+    Setting SASL up is not idempotent on the face of it: postfix is already
+    in the sasl group and the socket directory is already there, and neither
+    of those stops the rest of the script.
     """
     restart(restartable_authenticated_relay)
 
@@ -243,9 +243,6 @@ def test_saslauthd_answers_inside_the_postfix_chroot(authenticated_relay):
     assert 'sasl' in container_exec(authenticated_relay, ["id", "postfix"])
 
 
-@pytest.mark.xfail(reason="see issue #179: the statoverride is recorded but never "
-                          "applied, so the directory keeps the mode mkdir gave it",
-                   strict=True)
 def test_the_saslauthd_socket_is_restricted_to_the_sasl_group(authenticated_relay):
     """Anyone who can reach the socket can ask saslauthd to check a password.
 

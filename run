@@ -235,9 +235,6 @@ mech_list: CRAM-MD5 DIGEST-MD5 LOGIN PLAIN
 EOF
   fi
   
-  # Updating saslauthd config to work with chroot
-  dpkg-statoverride --add root sasl 710 /var/spool/postfix/var/run/saslauthd
-  
   # Giving postfix permission to use saslauthd
   adduser postfix sasl
   
@@ -251,7 +248,20 @@ password        required        pam_deny.so
 EOF
   fi
   
-  mkdir -p /var/spool/postfix/var/run/saslauthd
+  # saslauthd makes its mux world writable itself, so the directory holding it
+  # is the access control: root:sasl 710 lets the sasl group in and nobody
+  # else. Postfix drops privileges with initgroups(), so a chrooted smtpd
+  # running as postfix carries the group added just above and can traverse the
+  # directory to reach the socket.
+  #
+  # Set here rather than through dpkg-statoverride, which only records what a
+  # future dpkg unpack should apply -- nothing a container ever runs -- so the
+  # mode never reached the directory at all and re-adding the override was an
+  # error on every restart (issue #179). This has to stay below the
+  # "chown -R postfix:postfix /var/spool/postfix" above, which would take the
+  # directory back.
+  install -d -o root -g sasl -m 710 /var/spool/postfix/var/run/saslauthd
+
   saslauthd -c -r -a pam -m /var/spool/postfix/var/run/saslauthd &
 fi
 
