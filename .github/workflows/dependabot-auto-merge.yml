@@ -11,9 +11,9 @@
 # "Pytest (arm/v7, emulated)", "Event File" and "Test Results"; "ci" and
 # "test" are workflows and never report a check of their own.
 #
-# "Pytest (arm/v7, emulated)" does not run on pull requests unless one is
-# labelled "test-emulated", so requiring it would leave every pull request
-# waiting for a check that never arrives.
+# "Pytest (arm/v7, emulated)" reports "skipped" on a pull request that is not
+# labelled "test-emulated", which is nearly all of them, so requiring it would
+# gate on a check that did not run rather than on one that passed.
 
 name: Dependabot auto-merge
 

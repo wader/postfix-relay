@@ -87,10 +87,8 @@ jobs:
         run: pip install -r tests/requirements.txt
 
       - name: Run tests
-        # Named, because all three jobs write a file called test-results.xml
-        # and they are published as one report.
         timeout-minutes: 10
-        run: pytest -o junit_suite_name=arm64 --junitxml=junit/test-results.xml
+        run: pytest --junitxml=junit/test-results.xml
 
       - name: Upload Test Results
         if: (!cancelled())
@@ -173,12 +171,13 @@ jobs:
         timeout-minutes: 25
         env:
           POSTFIX_RELAY_IMAGE: postfix-relay:test-armv7
-        run: pytest -m smoke -o junit_suite_name=arm-v7 --junitxml=junit/test-results.xml
+        run: pytest -m smoke --junitxml=junit/test-results.xml
 
       - name: Upload Test Results
         if: (!cancelled())
         uses: actions/upload-artifact@v7
         with:
-          name: Test Results (arm/v7)
+          # No slash: upload-artifact rejects one in an artifact name.
+          name: Test Results (armv7)
           path: |
             junit/*.xml
