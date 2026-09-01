@@ -45,13 +45,15 @@ smtpdPort()
 # narrowed to addresses that do not include it, in which case the first one it
 # names does: a relay is free to serve only the address its clients reach it
 # on, and greeting loopback there would refuse to start a relay that works.
-# Read with "-x" so that main.cf macros are expanded: "inet_interfaces =
-# $myhostname" is an ordinary way to write this, and "-h" alone hands back the
-# literal "$myhostname" to dial.
 smtpdAddress()
 {
     local interfaces entry first
 
+    # -hx, not -h: postconf prints a value verbatim unless asked to expand it,
+    # and "inet_interfaces = $myhostname" is one of the three settings postfix
+    # itself suggests in the stock main.cf. Unexpanded, the probe below opens
+    # /dev/tcp/$myhostname/<port>, which resolves to nothing, and a relay that
+    # serves its clients perfectly well is refused at start-up.
     interfaces=$(postconf -hx inet_interfaces)
     for entry in ${interfaces//,/ } ; do
       case "$entry" in
@@ -70,22 +72,28 @@ awaitGreeting()
 
     for try in 1 2 3 4 5 ; do
       # The connection is opened inside a subshell, and the redirection that
-      # silences a refused one is on the substitution rather than on "exec":
-      # "exec ... 2> /dev/null" has no command to apply to, so it would send
-      # this script's own stderr to /dev/null for the rest of the container's
-      # life, taking every message below with it.
+      # silences a refused one is on a group *inside* the substitution. Not on
+      # "exec": "exec ... 2> /dev/null" has no command to apply to, so it would
+      # send this script's own stderr to /dev/null for the rest of the
+      # container's life, taking every message below with it. And not on the
+      # substitution either, which is what "greeting=$( ... ) 2> /dev/null"
+      # reads as but is not: bash applies that redirection to the assignment,
+      # which writes nothing, so every refused attempt printed two lines of its
+      # own above the message that explains what actually happened.
       greeting=$(
-        exec 3<>"/dev/tcp/$address/$port" || exit
-        # Short: master accepts at once when an smtpd can run, and holds the
-        # connection open with nothing behind it when one cannot -- it keeps
-        # the socket while it throttles the service it could not start. Five
-        # tries of this is the whole cost of refusing a broken relay.
-        read -t 2 -r line <&3
-        # QUIT rather than dropping the connection, so the one line this
-        # leaves in the log is a disconnect and not a lost connection.
-        printf 'QUIT\r\n' >&3
-        echo "$line"
-      ) 2> /dev/null
+        {
+          exec 3<>"/dev/tcp/$address/$port" || exit
+          # Short: master accepts at once when an smtpd can run, and holds the
+          # connection open with nothing behind it when one cannot -- it keeps
+          # the socket while it throttles the service it could not start. Five
+          # tries of this is the whole cost of refusing a broken relay.
+          read -t 2 -r line <&3
+          # QUIT rather than dropping the connection, so the one line this
+          # leaves in the log is a disconnect and not a lost connection.
+          printf 'QUIT\r\n' >&3
+          echo "$line"
+        } 2> /dev/null
+      )
 
       case "$greeting" in 220*) return 0 ;; esac
       sleep 0.2
