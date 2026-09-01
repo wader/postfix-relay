@@ -668,7 +668,7 @@ deactivate
 
 The suite spends its time waiting on containers rather than on the
 processor, so it runs its files several at a time, which is what
-`pytest.ini` asks for. One file at a time takes about nine minutes and
+`pytest.ini` asks for. One file at a time takes about eight minutes and
 leaves the machine mostly idle; four at a time takes about two and a half.
 
 The tests build the image and run it, so what they check is the image
