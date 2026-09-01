@@ -4,6 +4,8 @@ import time
 
 from testcontainers.core.container import DockerContainer
 
+from tests.helpers import healthcheck_after_stopping
+
 HEALTHCHECK = "/root/healthcheck"
 SUBMISSION = "submission/inet=submission inet n - y - - smtpd"
 # The same service with its process count limit lifted, which postfix starts
@@ -48,12 +50,10 @@ def test_relay_with_everything_running_is_healthy(signing_relay):
     assert exit_code == 0
 
 def test_stopped_opendkim_is_unhealthy(signing_relay):
-    signing_relay.exec("pkill -x opendkim")
-
-    exit_code, output = run_healthcheck(signing_relay, expected=1)
+    exit_code, output = healthcheck_after_stopping(signing_relay, "opendkim")
 
     assert exit_code == 1
-    assert 'relayed unsigned' in output
+    assert 'relayed unsigned' in output.decode()
 
 def test_relay_stops_when_a_daemon_exits(postfix_image):
     container = start_relay(postfix_image)
@@ -163,12 +163,10 @@ def test_stopped_postsrsd_is_unhealthy(relay_factory):
     SRS was turned on to rewrite."""
     relay = relay_factory(POSTSRSD_SRS_DOMAIN='srs.example.com')
 
-    relay.exec("pkill -x postsrsd")
-
-    exit_code, output = run_healthcheck(relay, expected=1)
+    exit_code, output = healthcheck_after_stopping(relay, "postsrsd")
 
     assert exit_code == 1
-    assert 'envelope senders are not rewritten' in output
+    assert 'envelope senders are not rewritten' in output.decode()
 
 
 def test_stopped_saslauthd_is_unhealthy(relay_factory):
@@ -176,12 +174,10 @@ def test_stopped_saslauthd_is_unhealthy(relay_factory):
     client that tries to authenticate."""
     relay = relay_factory(SASL_Passwds='/etc/postfix/sasl/sasl_passwds')
 
-    relay.exec("pkill -x saslauthd")
-
-    exit_code, output = run_healthcheck(relay, expected=1)
+    exit_code, output = healthcheck_after_stopping(relay, "saslauthd")
 
     assert exit_code == 1
-    assert 'clients cannot authenticate' in output
+    assert 'clients cannot authenticate' in output.decode()
 
 
 def test_a_postfix_that_is_not_running_is_unhealthy(relay_factory):
@@ -189,12 +185,13 @@ def test_a_postfix_that_is_not_running_is_unhealthy(relay_factory):
     no mail is being accepted at all."""
     relay = relay_factory()
 
-    relay.exec("postfix stop")
-
-    exit_code, output = run_healthcheck(relay, expected=1)
+    # Stopped the way an operator would, but the master is supervised like
+    # the rest, so this is the same race as the daemons above.
+    exit_code, output = healthcheck_after_stopping(relay, "master",
+                                                   stop="postfix stop")
 
     assert exit_code == 1
-    assert 'postfix master is not running' in output
+    assert 'postfix master is not running' in output.decode()
 
 
 def test_a_service_with_no_process_limit_is_still_expected_to_listen(relay_factory):
