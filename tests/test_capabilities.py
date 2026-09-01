@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from tests.helpers import container_exec, send
+from tests.helpers import container_exec, exit_code_within, send
 
 # The set documented in the README, and the reason for each of them:
 # CHOWN and FOWNER for giving the queue to postfix and the DKIM keys to
@@ -56,7 +56,7 @@ def test_dropping_everything_stops_the_container(postfix_factory):
     """The set is what is needed, not a list nobody checked."""
     relay = postfix_factory(kwargs={'cap_drop': ['ALL']}, wait_ready=False)
 
-    assert relay.get_wrapped_container().wait(timeout=60)['StatusCode'] == 1
+    assert exit_code_within(relay, seconds=60) == 1
 
 
 def test_the_hardened_relay_stops_gracefully(hardened_relay):

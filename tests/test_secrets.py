@@ -11,7 +11,7 @@ import pytest
 from testcontainers.community.mailpit import MailpitUser
 
 from tests.helpers import (container_exec, container_log, container_stderr,
-                           healthcheck_after_stopping, send)
+                           exit_code_within, healthcheck_after_stopping, send)
 
 UPSTREAM = '[secrets-upstream]:1025'
 USER, PASSWORD = 'relay', 's3cret'
@@ -93,7 +93,7 @@ def test_a_path_that_cannot_be_read_stops_the_container(postfix_factory):
     relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': '/run/secrets/not_mounted'},
                             wait_ready=False)
 
-    assert relay.get_wrapped_container().wait(timeout=30)['StatusCode'] == 1
+    assert exit_code_within(relay, seconds=30) == 1
     assert 'which cannot be read' in container_stderr(relay)
 
 

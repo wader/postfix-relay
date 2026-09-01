@@ -4,7 +4,8 @@ import time
 
 from testcontainers.core.container import DockerContainer
 
-from tests.helpers import container_log, healthcheck_after_stopping, wait_for_log
+from tests.helpers import (container_log, exit_code_within,
+                           healthcheck_after_stopping, wait_for_log)
 
 HEALTHCHECK = "/root/healthcheck"
 SUBMISSION = "submission/inet=submission inet n - y - - smtpd"
@@ -64,7 +65,7 @@ def test_relay_stops_when_a_daemon_exits(postfix_image):
 
         # Losing rsyslogd means relaying mail nobody can see afterwards, and
         # exiting 0 would look like a clean stop to a restart policy.
-        assert wrapped.wait(timeout=30)['StatusCode'] == 1
+        assert exit_code_within(container, seconds=30) == 1
         assert 'A daemon exited on its own' in wrapped.logs().decode()
     finally:
         container.stop()
@@ -100,6 +101,9 @@ def test_daemon_that_cannot_start_stops_the_container(postfix_image):
         })
 
     try:
+        # Not exit_code_within: this container comes straight from docker-py
+        # rather than from the fixtures, and the helper unwraps a
+        # testcontainers one.
         assert container.wait(timeout=60)['StatusCode'] == 1
         assert 'opendkim did not start' in container.logs().decode()
     finally:
@@ -112,7 +116,7 @@ def test_stopping_the_container_is_still_a_clean_exit(postfix_image):
     try:
         wrapped.stop()
 
-        assert wrapped.wait(timeout=30)['StatusCode'] == 0
+        assert exit_code_within(container, seconds=30) == 0
     finally:
         container.stop()
 
