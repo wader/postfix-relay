@@ -198,8 +198,9 @@ def test_an_interrupt_stops_the_container_cleanly(postfix_factory):
     assert wrapped.wait(timeout=30)['StatusCode'] == 0
 
 
-# Every daemon "run" starts, and what turns it on. rsyslogd is the only one
-# it starts in the foreground, and the only one whose death it notices.
+# Every daemon "run" starts, and what turns it on. rsyslogd is the only one it
+# starts in the foreground; the others are supervised by polling, so all five
+# have to take the container down with them.
 SUPERVISED_DAEMONS = [
     ('rsyslogd', {}),
     ('master', {}),
@@ -211,8 +212,7 @@ SUPERVISED_DAEMONS = [
 
 @pytest.mark.parametrize("daemon,env", SUPERVISED_DAEMONS,
                          ids=[daemon for daemon, _ in SUPERVISED_DAEMONS])
-def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix_factory,
-                                                            request):
+def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix_factory):
     """The README's promise, for each of the five daemons in turn.
 
     "A daemon that later gives up on its own exits the container non-zero,
@@ -221,22 +221,18 @@ def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix
     unlogged, or -- when it is the postfix master that is gone -- not at
     all, with nothing but the health check to say so.
     """
-    if daemon != 'rsyslogd':
-        request.node.add_marker(pytest.mark.xfail(
-            reason="see issue #176: only rsyslogd is started in the foreground, "
-                   "so it is the only one \"wait\" is waiting for",
-            strict=True))
-
     relay = postfix_factory(env=env)
 
     relay.exec(f"pkill -x {daemon}")
 
-    assert exit_code_within(relay) == 1
+    # Longer than the default bound: rsyslogd is a job of the start-up script
+    # and its death is seen at once, but the other four are noticed by the
+    # supervision loop, so the wait has to cover a poll interval and the
+    # second reading that confirms it. It costs nothing when the container
+    # does stop, which is the outcome being asserted.
+    assert exit_code_within(relay, seconds=15) == 1
 
 
-@pytest.mark.xfail(reason="see issue #180: nothing recreates the chroot's /dev "
-                          "when the queue is mounted from an empty directory",
-                   strict=True)
 def test_the_chroot_still_works_when_the_queue_is_mounted_from_the_host(
         tmp_path, postfix_factory):
     """The README's own volume example is a host directory, which is empty.

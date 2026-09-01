@@ -1,20 +1,35 @@
 #!/bin/bash
 
-# "service ... start" returns as soon as start-stop-daemon has forked, so a
-# daemon that dies on its configuration does so after a successful start. Wait
-# for it to be there, rather than relaying mail without the signing or the
-# rewriting the container was asked for.
-startService()
-{
-    local name="$1" process="$2" try
+# Every daemon this configuration needs, filled in as each one is started and
+# watched by the supervision loop at the end. Kept here rather than derived
+# from the environment a second time: what was started is what has to stay up.
+supervised=""
 
-    service "$name" start
+# "service ... start" returns as soon as start-stop-daemon has forked and
+# saslauthd daemonises itself, so a daemon that dies on its configuration does
+# so after a successful start. Wait for it to be there, rather than relaying
+# mail without the signing or the rewriting the container was asked for.
+awaitProcess()
+{
+    local process="$1" try
+
     for try in 1 2 3 4 5 ; do
       if pgrep -x "$process" > /dev/null ; then
-        return
+        supervised="$supervised $process"
+        return 0
       fi
       sleep 0.2
     done
+
+    return 1
+}
+
+startService()
+{
+    local name="$1" process="$2"
+
+    service "$name" start
+    awaitProcess "$process" && return
 
     echo "$name did not start, refusing to relay without it." >&2
     exit 1
@@ -118,14 +133,23 @@ srsConfig()
     fi
     chmod a=,u=rw /etc/postsrsd.secret
 
-    # POSTSRSD_var env -> put "var=value" line in /etc/default/postsrsd.
+    # POSTSRSD_var env -> put "var='value'" line in /etc/default/postsrsd.
     # The file is sourced by the init script, so appending overrides the
     # packaged defaults. The block is regenerated to stay idempotent when a
     # container is restarted.
+    #
+    # The value is single quoted because that init script is /bin/sh with
+    # "set -e": unquoted, a value with a space in it is read as an assignment
+    # followed by a command, and the command not being found takes the init
+    # script down with it (issue #177). Embedded single quotes are closed,
+    # escaped and reopened, which is what the replacement below does. Only the
+    # assignment is quoted: the init script still splits the value into words
+    # when it builds the daemon arguments, so SRS_EXTRA_OPTIONS='-A -t60'
+    # still reaches postsrsd as two options.
     sed -i "/$srsMarker/,\$d" /etc/default/postsrsd
     echo "$srsMarker" >> /etc/default/postsrsd
     for e in ${!POSTSRSD_*} ; do
-      echo "${e:9}=${!e}" >> /etc/default/postsrsd
+      printf "%s='%s'\n" "${e:9}" "${!e//\'/\'\\\'\'}" >> /etc/default/postsrsd
     done
 
     # Point postfix at postsrsd, unless the user configured the maps
@@ -153,6 +177,15 @@ rm -f \
   /run/postsrsd.pid \
   /run/rsyslogd.pid \
   /var/spool/postfix/pid/master.pid
+
+# A queue mounted from a host directory hides /var/spool/postfix/dev, which
+# ships in the image, empty, and is where rsyslog opens the log socket the
+# chrooted postfix daemons write to. Nothing else recreates it: it has no entry
+# in postfix-files, so "postfix check" does not, and Debian's chroot resync
+# only fills etc/, lib/ and usr/lib/sasl2. Without it rsyslogd reports it
+# cannot create the socket and everything that connects to syslog after
+# chrooting is logged nowhere (issue #180).
+mkdir -p /var/spool/postfix/dev
 
 secretsFromFiles
 
@@ -201,7 +234,24 @@ for e in ${!OPENDKIM_*} ; do
   echo "${e:9} ${!e}" >> /etc/opendkim.conf
 done
 
-trap "stopping=1; service postfix stop; service opendkim stop; service postsrsd stop; pkill -TERM rsyslogd; pkill -TERM saslauthd" SIGTERM SIGINT
+# Stop everything this script started, on either way out: the container being
+# stopped, or this script giving up on a daemon that is gone. rsyslogd is
+# signalled last and waited for, so that what the others write on their way out
+# still reaches the container log.
+stopDaemons()
+{
+    [ -n "$stopped" ] && return
+    stopped=1
+
+    service postfix stop
+    service opendkim stop
+    service postsrsd stop
+    pkill -TERM saslauthd
+    pkill -TERM rsyslogd
+    wait "$rsyslogPid" 2> /dev/null
+}
+
+trap 'stopping=1 ; stopDaemons' SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
   startService opendkim opendkim
@@ -226,9 +276,6 @@ mech_list: CRAM-MD5 DIGEST-MD5 LOGIN PLAIN
 EOF
   fi
   
-  # Updating saslauthd config to work with chroot
-  dpkg-statoverride --add root sasl 710 /var/spool/postfix/var/run/saslauthd
-  
   # Giving postfix permission to use saslauthd
   adduser postfix sasl
   
@@ -242,8 +289,25 @@ password        required        pam_deny.so
 EOF
   fi
   
-  mkdir -p /var/spool/postfix/var/run/saslauthd
+  # saslauthd makes its mux world writable itself, so the directory holding it
+  # is the access control: root:sasl 710 lets the sasl group in and nobody
+  # else. Postfix drops privileges with initgroups(), so a chrooted smtpd
+  # running as postfix carries the group added just above and can traverse the
+  # directory to reach the socket.
+  #
+  # Set here rather than through dpkg-statoverride, which only records what a
+  # future dpkg unpack should apply -- nothing a container ever runs -- so the
+  # mode never reached the directory at all and re-adding the override was an
+  # error on every restart (issue #179). This has to stay below the
+  # "chown -R postfix:postfix /var/spool/postfix" above, which would take the
+  # directory back.
+  install -d -o root -g sasl -m 710 /var/spool/postfix/var/run/saslauthd
+
   saslauthd -c -r -a pam -m /var/spool/postfix/var/run/saslauthd &
+  awaitProcess saslauthd || {
+    echo "saslauthd did not start, refusing to relay without it." >&2
+    exit 1
+  }
 fi
 
 startService postfix master
@@ -285,14 +349,41 @@ EOF
 fi
 
 rsyslogd -n &
-wait
+rsyslogPid=$!
+supervised="$supervised rsyslogd"
 
-# Reaching this without having been signalled means a daemon started here gave
-# up on its own. Exiting 0 would look like a clean stop and leave an
-# on-failure restart policy with nothing to act on.
-if [ -z "$stopping" ] ; then
-  echo "A daemon exited on its own, stopping the relay." >&2
-  exit 1
-fi
+# rsyslogd is the only one of them that is a child of this script, so the bare
+# "wait" this replaces was watching one daemon out of five and the container
+# went on relaying when any of the other four died (issue #176). Polling
+# "pgrep -x", the way the health check does, watches all of them and needs
+# nothing beyond reading /proc -- signalling a daemon that dropped to its own
+# user would need a capability the README asks deployments to drop.
+while [ -z "$stopping" ] ; do
+  # The sleep runs in the background and is waited for: "wait" is interrupted
+  # by a trapped signal, while a foreground "sleep" would postpone the stop by
+  # a whole interval. "-n" returns on whichever finishes first, so rsyslogd --
+  # the one daemon that is still a job of this shell -- is noticed the moment
+  # it dies rather than at the end of the interval.
+  sleep 2 &
+  wait -n
+  [ -n "$stopping" ] && break
+
+  for daemon in $supervised ; do
+    pgrep -x "$daemon" > /dev/null && continue
+
+    # A daemon takes a moment to actually go away, and a relay that is fine is
+    # not worth stopping over a single missed reading.
+    sleep 1 &
+    wait $!
+    [ -n "$stopping" ] && break 2
+    pgrep -x "$daemon" > /dev/null && continue
+
+    # Exiting 0 would look like a clean stop and leave an on-failure restart
+    # policy with nothing to act on.
+    echo "A daemon exited on its own, stopping the relay: $daemon is gone." >&2
+    stopDaemons
+    exit 1
+  done
+done
 
 exit 0
