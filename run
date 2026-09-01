@@ -31,17 +31,39 @@ smtpdPort()
 {
     local service port
 
-    service=$(postconf -M | awk '$2 == "inet" && $NF == "smtpd" && $1 !~ /:/ { print $1 ; exit }')
+    # $8 is master.cf's command column. The last field is not it: an entry
+    # carries its "-o" options after the command, which is what
+    # POSTFIXMASTER_ variables are for, and reading $NF there matches nothing.
+    service=$(postconf -M | awk '$2 == "inet" && $8 == "smtpd" && $1 !~ /:/ { print $1 ; exit }')
     [ -n "$service" ] || return 1
 
     port=$(getent services "$service" | awk '{ sub("/.*", "", $2) ; print $2 }')
     echo "${port:-$service}"
 }
 
+# The address to greet on. Loopback answers unless inet_interfaces was
+# narrowed to addresses that do not include it, in which case the first one it
+# names does: a relay is free to serve only the address its clients reach it
+# on, and greeting loopback there would refuse to start a relay that works.
+smtpdAddress()
+{
+    local interfaces entry first
+
+    interfaces=$(postconf -h inet_interfaces)
+    for entry in ${interfaces//,/ } ; do
+      case "$entry" in
+        all|loopback-only|127.0.0.1|localhost) echo 127.0.0.1 ; return ;;
+      esac
+      [ -n "$first" ] || first="$entry"
+    done
+
+    echo "${first:-127.0.0.1}"
+}
+
 # Whether an smtpd survives long enough to greet a client.
 awaitGreeting()
 {
-    local port="$1" try greeting
+    local address="$1" port="$2" try greeting
 
     for try in 1 2 3 4 5 ; do
       # The connection is opened inside a subshell, and the redirection that
@@ -50,7 +72,7 @@ awaitGreeting()
       # this script's own stderr to /dev/null for the rest of the container's
       # life, taking every message below with it.
       greeting=$(
-        exec 3<>"/dev/tcp/127.0.0.1/$port" || exit
+        exec 3<>"/dev/tcp/$address/$port" || exit
         # Short: master accepts at once when an smtpd can run, and holds the
         # connection open with nothing behind it when one cannot -- it keeps
         # the socket while it throttles the service it could not start. Five
@@ -312,7 +334,10 @@ stopDaemons()
     wait "$rsyslogPid" 2> /dev/null
 }
 
-trap 'stopping=1 ; stopDaemons' SIGTERM SIGINT
+# Exits from the handler rather than only flagging the stop: during start-up
+# the script would otherwise carry on from where the signal interrupted it and
+# report the daemons it had just stopped as daemons that would not start.
+trap 'stopping=1 ; stopDaemons ; exit 0' SIGTERM SIGINT
 if [ ! -z "$OPENDKIM_DOMAINS" ] ; then
   dkimConfig
   startService opendkim opendkim
@@ -432,8 +457,9 @@ supervised="$supervised rsyslogd"
 # every interval there. After rsyslogd so that postfix's own reason -- the
 # "fatal:" line naming the setting -- is in the container log above this.
 smtpdPort=$(smtpdPort)
-if [ -n "$smtpdPort" ] && ! awaitGreeting "$smtpdPort" ; then
-  echo "No smtpd survived a connection on $smtpdPort, which a setting postfix" \
+smtpdAddress=$(smtpdAddress)
+if [ -n "$smtpdPort" ] && ! awaitGreeting "$smtpdAddress" "$smtpdPort" ; then
+  echo "No smtpd survived a connection on $smtpdAddress:$smtpdPort, which a setting postfix" \
        "rejects when smtpd reads it will do; refusing to relay. The line above" \
        "starting \"fatal:\" names it." >&2
   stopDaemons

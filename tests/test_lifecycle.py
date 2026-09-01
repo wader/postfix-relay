@@ -286,3 +286,65 @@ def test_the_chroot_still_works_when_the_queue_is_mounted_from_the_host(
 
     assert relay.exec(["test", "-S", "/var/spool/postfix/dev/log"]).exit_code == 0
     assert 'cannot create' not in container_log(relay)
+
+
+def test_the_greeting_check_still_covers_a_customised_smtp_service(postfix_factory):
+    """A master.cf entry carries its options after the command.
+
+    Adding "-o" options to smtp/inet is what POSTFIXMASTER_ is documented for,
+    and it moves the command away from the end of the line. Reading the last
+    field to find the smtpd to greet matches nothing then, no probe runs, and
+    the check above passes by not happening -- on the relays that were
+    customised, which are the ones most likely to have been customised wrong.
+    """
+    relay = postfix_factory(
+        env={
+            'POSTFIX_error_notice_recipient': '',
+            'POSTFIXMASTER_smtp__inet':
+                'smtp inet n - y - - smtpd -o smtpd_client_restrictions=permit_mynetworks,reject',
+        },
+        wait_ready=False)
+
+    assert exit_code_within(relay, seconds=25) == 1
+    assert 'No smtpd survived a connection' in container_log(relay) + container_stderr(relay)
+
+
+def test_a_relay_that_does_not_serve_loopback_still_starts(postfix_factory, mailpit):
+    """inet_interfaces names the addresses the relay serves, loopback or not.
+
+    Greeting 127.0.0.1 regardless refuses to start a relay that is working
+    for every client it has, and tells its operator to look for a postfix
+    "fatal:" line that was never written.
+    """
+    relay = postfix_factory(env={'POSTFIX_inet_interfaces': 'relay-off-loopback'},
+                            kwargs={'hostname': 'relay-off-loopback'})
+
+    # The probe is the last thing start-up does, and it takes its five
+    # attempts before giving up: a connection accepted through the published
+    # port only says the master is up, so the relay is given the time to
+    # refuse before it is called started.
+    assert exit_code_within(relay, seconds=20) is None
+
+    send(relay, subject='off loopback')
+
+    assert mailpit.wait_for_message('off loopback')
+
+
+def test_a_stop_during_start_up_is_not_reported_as_a_failure(postfix_factory):
+    """SIGTERM before the relay is up is still a stop the operator asked for.
+
+    Generating several keys holds start-up open long enough for the signal to
+    land in it. Should it land after start-up instead, this passes on the
+    ordinary path rather than failing: what it must never do is report a
+    daemon that would not start.
+    """
+    relay = postfix_factory(
+        env={'OPENDKIM_DOMAINS': ' '.join(f"d{n}.example" for n in range(8))},
+        wait_ready=False)
+    wrapped = relay.get_wrapped_container()
+
+    time.sleep(1)
+    wrapped.stop(timeout=30)
+
+    assert wrapped.wait(timeout=30)['StatusCode'] == 0
+    assert 'did not start' not in container_stderr(relay)
