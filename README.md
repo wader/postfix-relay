@@ -677,6 +677,26 @@ from mailpit. `tests/fixtures` has the containers and `tests/helpers.py`
 the few things tests keep doing, like waiting for a mail or reading back a
 postfix setting.
 
+Set `POSTFIX_RELAY_IMAGE` to run against an image that is already built
+instead of building one, which is how the suite is pointed at an image for
+another CPU architecture. Building one needs the emulators registered and a
+builder that can cross-build, which the default one cannot:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install arm
+docker buildx create --use --name cross
+docker buildx build --platform linux/arm/v7 --load -t postfix-relay:test-armv7 .
+POSTFIX_RELAY_IMAGE=postfix-relay:test-armv7 pytest -m smoke
+```
+
+CI runs the whole suite on `amd64` and on `arm64`, both natively. There is no
+`arm/v7` runner, so that image is emulated and only the handful of tests
+marked `smoke` run against it -- it starts, reports healthy, relays a message,
+and has no `postsrsd` -- on `master`, on a manual run, or on a pull request
+labelled `test-emulated` before its next push. Emulation is slow enough that
+the rest is not worth its minutes, and every wait in the suite is measured
+against a native run.
+
 | File | What it covers |
 | --- | --- |
 | `test_image.py` | The published image before anything runs: the defaults from the Dockerfile, the declared volumes, the exposed port, the health check, the programs the README has users run out of it |

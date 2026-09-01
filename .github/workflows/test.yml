@@ -5,10 +5,17 @@ on:
     branches:
       - 'master'
   pull_request:
+  # So the emulated job below can be asked for without pushing anything.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+# The three jobs that run pytest are spelled out rather than written as one
+# matrix, because a matrix appends its values to the job name and the names
+# here are what the required status checks and the Dependabot auto-merge
+# workflow match on. See the comment in dependabot-auto-merge.yml.
 
 jobs:
   event_file:
@@ -54,5 +61,124 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Test Results
+          path: |
+            junit/*.xml
+
+  arm64:
+    name: "Pytest (arm64)"
+    # The same run as the one above, on one of github's arm64 runners. Nothing
+    # is emulated and the image is built here like anywhere else, so this is
+    # the whole suite against the arm64 image everyone pulls, with none of the
+    # timing an emulated run would put in question. Both that image and the
+    # amd64 one have postsrsd; the one that does not is arm/v7, below.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Run tests
+        # Named, because all three jobs write a file called test-results.xml
+        # and they are published as one report.
+        timeout-minutes: 10
+        run: pytest -o junit_suite_name=arm64 --junitxml=junit/test-results.xml
+
+      - name: Upload Test Results
+        if: (!cancelled())
+        uses: actions/upload-artifact@v7
+        with:
+          name: Test Results (arm64)
+          path: |
+            junit/*.xml
+
+  arm_v7:
+    name: "Pytest (arm/v7, emulated)"
+    # There is no arm/v7 runner to be had, so this one runs under QEMU, and it
+    # is also the image that genuinely differs rather than being the same one
+    # recompiled: Debian builds no postsrsd for armhf, so the image ships
+    # without it and "run" refuses to start when SRS is asked for anyway.
+    #
+    # Emulation is slow and its failures are harder to read than real ones, so
+    # this stays off the path a pull request waits on: master, a manual run, or
+    # a pull request labelled "test-emulated" for the changes that want it. The
+    # label is read from the event that started the run, so it takes effect on
+    # the next push to the branch; "labeled" is deliberately not a trigger here,
+    # because Dependabot labels its pull requests as it opens them and the
+    # concurrency group above would have that cancel the run it just started.
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'test-emulated')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          # Pinned, unlike the one in ci.yml: that one only has to build an
+          # image, this one runs it, which is where the emulator's own bugs
+          # show up. Left at the default the emulator would change under us
+          # and a new failure here would not say whether the image changed or
+          # the emulator did.
+          image: tonistiigi/binfmt:qemu-v10.2.3-68
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the arm/v7 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm/v7
+          # One platform at a time, which is all the runner's image store can
+          # hold: it has no room for a manifest list, so a build naming two
+          # platforms cannot be loaded into it at all.
+          load: true
+          tags: postfix-relay:test-armv7
+          # Read only. ci.yml builds the same three platforms and writes the
+          # cache; there is nothing to be gained from this job writing it too.
+          cache-from: type=gha
+
+      - name: Setup python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Run the smoke tests
+        # Not the whole suite: every wait in it is measured against a native
+        # run, and emulation invalidates all of them. What runs is the handful
+        # marked "smoke" (see pytest.ini) -- the container starts, reports
+        # healthy, relays a whole message, and answers for the missing
+        # postsrsd -- which is what this job exists to find out.
+        #
+        # Only the relay is emulated. Mailpit publishes no arm/v7 image and
+        # does not need to: it is a separate container on the shared network
+        # and stays native, so nothing here may set a platform globally.
+        timeout-minutes: 25
+        env:
+          POSTFIX_RELAY_IMAGE: postfix-relay:test-armv7
+        run: pytest -m smoke -o junit_suite_name=arm-v7 --junitxml=junit/test-results.xml
+
+      - name: Upload Test Results
+        if: (!cancelled())
+        uses: actions/upload-artifact@v7
+        with:
+          name: Test Results (arm/v7)
           path: |
             junit/*.xml

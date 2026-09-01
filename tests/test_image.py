@@ -205,17 +205,28 @@ def test_openssl_is_available(image_shell):
     assert output.startswith('OpenSSL')
 
 
+@pytest.mark.smoke
 def test_postsrsd_is_installed_for_this_architecture(image_shell):
     """Debian does not build it for armhf, and "run" says so instead of
     relaying without the rewriting that was asked for. Everywhere else it
-    has to be there."""
+    has to be there.
+
+    Asserted both ways round rather than skipped on armhf, so that the one
+    architecture this is about is also the one it can fail on. The absence is
+    what the conditional install in the Dockerfile, the guard in "run", the
+    note in the README and the skip that used to be here all rest on, and a
+    point release that started shipping the package would leave every one of
+    them saying something untrue with nothing to notice.
+    """
     _, architecture = image_shell("dpkg --print-architecture")
     _, installed = image_shell("command -v postsrsd")
 
     if architecture.strip() == 'armhf':
-        pytest.skip("Debian does not build postsrsd for armhf in trixie")
-
-    assert installed.strip() == '/usr/sbin/postsrsd'
+        assert installed.strip() == '', \
+            "Debian now builds postsrsd for armhf, so the arm/v7 image has " \
+            "SRS after all: the Dockerfile, run and the README say otherwise"
+    else:
+        assert installed.strip() == '/usr/sbin/postsrsd'
 
 
 def test_the_certificate_authorities_are_installed(image_shell):

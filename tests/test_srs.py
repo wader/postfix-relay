@@ -248,16 +248,21 @@ def test_a_setting_that_needs_a_space_can_be_passed_through(postfix_factory):
     assert process_running(relay, 'postsrsd')
 
 
+@pytest.mark.smoke
 def test_the_container_refuses_to_start_without_postsrsd(postfix_factory):
     """Debian builds no postsrsd for armhf, so the arm/v7 image has none.
 
     Asking for SRS there stops the container instead of relaying without the
-    rewriting that was asked for, which would be a silent SPF failure. CI runs
-    on amd64, where the package exists, so the binary is hidden to reach the
-    branch rather than the architecture being changed.
+    rewriting that was asked for, which would be a silent SPF failure. On the
+    architectures that do have the package, which is where this usually runs,
+    the binary is hidden to reach the branch rather than the architecture
+    being changed; against the arm/v7 image there is nothing to hide and the
+    branch is reached the way a user would reach it.
     """
     relay = postfix_factory(
         env={'POSTSRSD_SRS_DOMAIN': SRS_DOMAIN},
+        # "command -v" finds nothing on armhf, and "rm -f" is untroubled by
+        # the empty name that leaves.
         command=['/bin/bash', '-c',
                  'rm -f "$(command -v postsrsd)" /etc/default/postsrsd /etc/init.d/postsrsd'
                  ' && exec /root/run'],

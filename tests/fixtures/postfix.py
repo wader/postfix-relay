@@ -14,13 +14,31 @@ ROOT_PATH = os.path.dirname(__file__) + '/../../'
 
 IMAGE_TAG = "postfix-relay:test"
 
+# An image built outside the suite, for the runs that cannot build their own.
+# Testing a foreign architecture needs buildx to produce the image and the
+# docker daemon to load it, neither of which the builder behind DockerImage
+# does, so CI builds that one itself and names it here. Unset, which is every
+# run on the machine it is meant for, the suite builds the image as it always
+# has.
+PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
+
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
 
 
 @pytest.fixture(scope="session")
 def postfix_image(tmp_path_factory):
-    """The image under test, built once for the whole run."""
+    """The image under test, built once for the whole run.
+
+    Every test reaches the image through here, so pointing this at a prebuilt
+    one is enough to run the suite against an image the suite did not build.
+    """
+    if PREBUILT_IMAGE:
+        # Asked for once, here, so that a tag that is not loaded says so
+        # instead of failing every test that tries to start a container.
+        docker.from_env().images.get(PREBUILT_IMAGE)
+        return PREBUILT_IMAGE
+
     once_across_workers(
         tmp_path_factory, "postfix-image",
         lambda: DockerImage(path=ROOT_PATH, tag=IMAGE_TAG).build())

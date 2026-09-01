@@ -19,6 +19,7 @@ def health(container):
     return wrapped.attrs['State']['Health']['Status']
 
 
+@pytest.mark.smoke
 def test_the_container_reports_healthy(postfix):
     assert poll_until(lambda: health(postfix) == 'healthy', timeout=60,
                       description="the container to report healthy")
