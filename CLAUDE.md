@@ -438,8 +438,9 @@ changing any of them.
     recipient side is not symmetrical:
     `recipient_canonical_classes=envelope_recipient,header_recipient`, so
     recipient addresses in headers *are* rewritten, and have been since the
-    feature landed. The comment above the block claims envelope-only for both;
-    the code is what is described here.
+    feature landed: a bounce coming back to an SRS address carries it in its
+    `To:` as well as in its envelope, and decoding both is what makes it
+    deliverable. (issue #225, commit `bed3c5b`)
 
 15. **`echo -n > /etc/opendkim.conf` truncates the packaged config on every
     start**, and the loop that rebuilds it explicitly `continue`s past
@@ -573,13 +574,3 @@ changing any of them.
     and a date is not a semver minor or patch, so base-image PRs never match
     the auto-merge rule and always wait for review. A suite change
     (trixie → forky) is a deliberate edit, as it was before. (commit `5de83d0`)
-
-### Comments that are currently wrong
-
-Two comments in the tree contradict the code they describe. Do not take them
-as evidence when auditing, and fix them where you are already editing the file:
-
-- `tests/test_sasl.py` still describes the removed `dpkg-statoverride`
-  mechanism in a docstring (invariant 10); the assertion it guards is correct.
-- the comment above the SRS canonical maps in `run` claims envelope-only
-  rewriting on both sides (invariant 14).
