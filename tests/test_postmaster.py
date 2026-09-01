@@ -26,6 +26,7 @@ REPORTING = {
     'POSTMAP_transport': 'nowhere.example smtp:[nothing.invalid]:25',
 }
 UNDELIVERABLE = 'receiver@nowhere.example'
+SENDER = 'sender@example.com'
 
 
 @pytest.fixture
@@ -112,14 +113,40 @@ def test_a_notice_actually_reaches_the_address(postfix_shared, mailpit):
     assert 'Host or domain name not found' in notice['Text']
 
 
+def test_the_recipients_are_inert_at_the_default_notify_classes(postfix_shared,
+                                                                mailpit):
+    """What the README promises for the three classes set anyway.
+
+    "notify_classes keeps its default, and the bounce, 2bounce and delay
+    recipients are only used if you widen it with POSTFIX_notify_classes.
+    They are set anyway so that they are already correct if you do." So a
+    bounce on a relay that did not widen it reaches the sender and nobody
+    else: naming an address must not start sending mail that was not being
+    sent before.
+    """
+    relay = postfix_shared(env={name: value for name, value in REPORTING.items()
+                                if name != 'POSTFIX_notify_classes'})
+
+    send(relay, sender=SENDER, recipients=(UNDELIVERABLE,),
+         subject='not reported to the postmaster')
+
+    bounce = mailpit.wait_for_message('Undelivered Mail Returned to Sender')
+    assert [to['Address'] for to in bounce['To']] == [SENDER]
+
+    # The postmaster copy is written by the same bounce daemon run as the
+    # sender's bounce, so one that was being sent would have arrived too.
+    assert [summary['Subject'] for summary in mailpit.summaries()
+            if 'Postmaster Copy' in summary['Subject']] == []
+
+
 def test_the_sender_still_gets_its_own_bounce(postfix_shared, mailpit):
     """The postmaster copy is a copy: telling the operator must not stop the
     person who sent the message from being told."""
     relay = postfix_shared(env=REPORTING)
 
-    send(relay, sender='sender@example.com', recipients=(UNDELIVERABLE,),
+    send(relay, sender=SENDER, recipients=(UNDELIVERABLE,),
          subject='also bounced to the sender')
 
     bounce = mailpit.wait_for_message('Undelivered Mail Returned to Sender')
 
-    assert [to['Address'] for to in bounce['To']] == ['sender@example.com']
+    assert [to['Address'] for to in bounce['To']] == [SENDER]
