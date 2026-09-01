@@ -1,8 +1,5 @@
 # Automatic dependency update pull requests
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
-#
-# tests/requirements.txt pins no versions, so a pip ecosystem would have
-# nothing to bump and is left out.
 
 version: 2
 updates:
@@ -41,3 +38,11 @@ updates:
     directory: /
     schedule:
       interval: daily
+
+  # The pinned test dependencies. They are exact pins now, so nothing moves
+  # them on its own, and the suite is what says whether a bump is safe: every
+  # one of these pull requests runs it.
+  - package-ecosystem: pip
+    directory: /tests
+    schedule:
+      interval: weekly
