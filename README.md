@@ -107,6 +107,18 @@ Postfix [configuration options](http://www.postfix.org/postconf.5.html) can be s
 using `POSTFIX_<name>` environment variables. See [Dockerfile](Dockerfile) for default
 configuration. You probably want to set `POSTFIX_myhostname` (the FQDN used by 220/HELO).
 
+Setting one of these to an **empty** value clears the parameter rather than
+being skipped, which is the only way to turn off a default the image ships:
+`POSTFIX_smtp_tls_security_level=` leaves the relay with no opportunistic TLS
+at all, where leaving the variable out keeps the Dockerfile's `may`.
+
+Not every parameter accepts an empty value, though, and postfix does not say so
+when it is written: `postconf` takes it, `postfix check` passes, and the daemon
+that reads it dies when it does. `error_notice_recipient` is one of those. The
+container asks postfix for a greeting before handing over, so it stops with the
+postfix `fatal:` line naming the parameter instead of coming up unable to
+relay — but the value is still yours to get right.
+
 Note that `POSTFIX_myhostname` will change the postfix option
 [myhostname](http://www.postfix.org/postconf.5.html#myhostname). The image ships
 `POSTFIX_myhostname=hostname`, so unless you set it yourself a running container
