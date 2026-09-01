@@ -210,8 +210,12 @@ srsConfig()
     done
 
     # Point postfix at postsrsd, unless the user configured the maps
-    # themselves. Only envelope addresses are rewritten: rewriting the
-    # message headers would break the visible From/To.
+    # themselves. The sender side is envelope only, so the visible From is
+    # left alone -- rewriting it would change who the message says it is
+    # from. The recipient side also covers header recipients, so that an SRS
+    # address a bounce carries in its To is decoded back along with the
+    # envelope; anything that is not an SRS address is returned unchanged by
+    # postsrsd and left as it was.
     if [ -z "$POSTFIX_sender_canonical_maps" ] ; then
       postconf -e "sender_canonical_maps=tcp:127.0.0.1:${POSTSRSD_SRS_FORWARD_PORT:-10001}"
     fi

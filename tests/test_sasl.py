@@ -248,8 +248,8 @@ def test_the_saslauthd_socket_is_restricted_to_the_sasl_group(authenticated_rela
 
     That is a password oracle with no rate limit, and the log lines it
     writes go to the auth facility, which the generated rsyslog
-    configuration keeps off stdout. "run" asks for root:sasl 710 through
-    dpkg-statoverride, and postfix is added to the group for it.
+    configuration keeps off stdout. "run" creates the directory root:sasl
+    710 with "install -d", and postfix is added to the group for it.
     """
     assert container_exec(
         authenticated_relay,
