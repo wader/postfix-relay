@@ -1,3 +1,4 @@
+import os
 import re
 import smtplib
 import time
@@ -22,6 +23,43 @@ def poll_until(predicate, timeout=DEFAULT_TIMEOUT, description="condition"):
         if time.monotonic() >= deadline:
             raise AssertionError(f"timed out after {timeout}s waiting for {description}")
         time.sleep(0.2)
+
+
+def once_across_workers(tmp_path_factory, name, produce, timeout=600):
+    """Call "produce" once for the whole run, however many workers there are.
+
+    pytest-xdist runs every worker in a process of its own, so a session
+    scoped fixture is set up once per worker rather than once per run. That
+    is what keeps the workers independent and is what one wants for the
+    containers, but not for getting the images they run: the same build
+    would be done several times over, and several pulls of the same base
+    image at the same moment are answered by the registry with a 429 rather
+    than with the image.
+
+    The first worker to create the lock does the work and leaves a marker
+    behind, the others wait for that marker. Without xdist there is nothing
+    to coordinate and "produce" is simply called.
+    """
+    if os.environ.get('PYTEST_XDIST_WORKER') is None:
+        produce()
+        return
+
+    # getbasetemp() is per worker, its parent is shared by all of them.
+    shared = tmp_path_factory.getbasetemp().parent
+    lock = shared / f"{name}.lock"
+    done = shared / f"{name}.done"
+
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL))
+    except FileExistsError:
+        poll_until(done.is_file, timeout=timeout,
+                   description=f"{name} to be made ready by another worker")
+        return
+
+    produce()
+    # Written only once the work is finished, so that a worker seeing it can
+    # rely on the image being there.
+    done.touch()
 
 
 def wait_for_smtp(container, port=25, timeout=DEFAULT_TIMEOUT):

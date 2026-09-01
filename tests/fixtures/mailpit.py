@@ -1,12 +1,13 @@
 import time
 
+import docker
 import pytest
 import requests
 
 from testcontainers.community.mailpit import MailpitContainer
 
 from tests.conftest import print_log_on_failure
-from tests.helpers import poll_until
+from tests.helpers import once_across_workers, poll_until
 
 IMAGE = "axllent/mailpit:v1.27"
 
@@ -78,8 +79,21 @@ class Mailpit:
 
 
 @pytest.fixture(scope="session")
-def mailpit_container(shared_network):
-    container = MailpitContainer(IMAGE) \
+def mailpit_image(tmp_path_factory):
+    """The mailpit image, pulled once for the whole run.
+
+    Starting a container pulls the image it needs, so without this every
+    worker would pull this one at the same moment as the others.
+    """
+    once_across_workers(tmp_path_factory, "mailpit-image",
+                        lambda: docker.from_env().images.pull(IMAGE))
+
+    return IMAGE
+
+
+@pytest.fixture(scope="session")
+def mailpit_container(shared_network, mailpit_image):
+    container = MailpitContainer(mailpit_image) \
         .with_network(shared_network) \
         .with_network_aliases('mailpit')
 
@@ -98,7 +112,7 @@ def mailpit(mailpit_container):
 
 
 @pytest.fixture
-def mailpit_factory(shared_network, request):
+def mailpit_factory(shared_network, mailpit_image, request):
     """Start extra relay targets, for tests that need their own.
 
         upstream = mailpit_factory('upstream', users=[MailpitUser('user', 'pass')])
@@ -106,7 +120,7 @@ def mailpit_factory(shared_network, request):
     started = []
 
     def start(alias, users=None):
-        container = MailpitContainer(IMAGE, users=users) \
+        container = MailpitContainer(mailpit_image, users=users) \
             .with_network(shared_network) \
             .with_network_aliases(alias)
 

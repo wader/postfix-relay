@@ -27,7 +27,7 @@ jobs:
     # Backstop only. Exceeding a job timeout cancels the job, and a cancelled
     # job does not run the upload below, so the bound that is expected to fire
     # is on the test step instead: it fails, and the results still get reported.
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -42,10 +42,11 @@ jobs:
         run: pip install -r tests/requirements.txt
       
       - name: Run tests
-        # The suite builds the image and then takes a few minutes; every wait
-        # in it is already bounded, so overrunning this by much means something
-        # is stuck rather than slow.
-        timeout-minutes: 15
+        # The suite builds the image and then runs its files four at a time
+        # (see pytest.ini); it takes about three minutes on this runner. Every
+        # wait in it is bounded, so overrunning this by much means something is
+        # stuck rather than slow.
+        timeout-minutes: 10
         run: pytest --junitxml=junit/test-results.xml
       
       - name: Upload Test Results
