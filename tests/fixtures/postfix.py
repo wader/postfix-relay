@@ -29,7 +29,7 @@ def postfix_image(tmp_path_factory):
 
 
 def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
-           command=None, wait_ready=True, kwargs=None):
+           command=None, wait_ready=True, kwargs=None, register=None):
     container = DockerContainer(image=image) \
         .with_network(network) \
         .with_network_aliases(alias or f"postfix-{next(_alias_numbers)}") \
@@ -54,6 +54,12 @@ def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alia
         container.with_kwargs(**kwargs)
 
     container.start()
+    # Handed over before the wait rather than after it: a relay that never
+    # comes up makes the wait raise, and a caller that only learns about the
+    # container when _start returns would neither stop it nor have it to show
+    # the log of -- which is the one thing that says why it did not come up.
+    if register is not None:
+        register(container)
 
     if wait_ready:
         wait_for_smtp(container, port=ports[0])
@@ -64,11 +70,15 @@ def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alia
 @pytest.fixture(scope="session")
 def postfix(postfix_image, shared_network):
     """Relay with the image default configuration, shared by all tests."""
-    container = _start(postfix_image, shared_network, alias='postfix')
+    started = []
+    try:
+        container = _start(postfix_image, shared_network, alias='postfix',
+                           register=started.append)
 
-    yield container
-
-    container.stop()
+        yield container
+    finally:
+        for container in started:
+            container.stop()
 
 
 @pytest.fixture
@@ -93,11 +103,9 @@ def postfix_factory(postfix_image, shared_network, request):
 
     def start(env=None, files=None, volumes=None, ports=(25,), alias=None, command=None,
               wait_ready=True, kwargs=None):
-        container = _start(postfix_image, shared_network, env=env, files=files,
-                           volumes=volumes, ports=ports, alias=alias, command=command,
-                           wait_ready=wait_ready, kwargs=kwargs)
-        started.append(container)
-        return container
+        return _start(postfix_image, shared_network, env=env, files=files,
+                      volumes=volumes, ports=ports, alias=alias, command=command,
+                      wait_ready=wait_ready, kwargs=kwargs, register=started.append)
 
     yield start
 
@@ -165,8 +173,8 @@ def postfix_shared(_relay_pool, postfix_image, shared_network, request):
         key = (tuple(sorted((env or {}).items())),
                tuple(sorted((files or {}).items())), tuple(ports))
         if key not in _relay_pool:
-            _relay_pool[key] = _start(postfix_image, shared_network, env=env,
-                                      files=files, ports=ports)
+            _start(postfix_image, shared_network, env=env, files=files, ports=ports,
+                   register=lambda container: _relay_pool.__setitem__(key, container))
         container = _relay_pool[key]
         used.append(container)
         return container
