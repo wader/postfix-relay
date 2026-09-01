@@ -151,8 +151,20 @@ dkimConfig()
       txtFile="$domainDir/$selector.txt"
       if [ ! -f "$privateFile" ] ; then
         echo "No DKIM private key found for selector '$selector' in domain '$domain'. Generating one now..."
-        mkdir -p "$domainDir"
-        opendkim-genkey -D "$domainDir" --selector=$selector --domain=$domain --append-domain
+        # A key that could not be written is worse than no DKIM at all: the
+        # tables below would name it, opendkim would start without being able
+        # to load it, and the milter would answer every message with a
+        # tempfail -- a relay that accepts nothing while it reports healthy.
+        if ! mkdir -p "$domainDir" \
+           || ! opendkim-genkey -D "$domainDir" --selector="$selector" \
+                --domain="$domain" --append-domain \
+           || [ ! -f "$privateFile" ] ; then
+          echo "Could not generate a DKIM key for selector '$selector' in" \
+               "domain '$domain': /etc/opendkim/keys has to be writable, or" \
+               "hold the keys already. Refusing to relay without the signing" \
+               "that was asked for." >&2
+          exit 1
+        fi
       fi
 
       # Ensure strict permissions required by opendkim
