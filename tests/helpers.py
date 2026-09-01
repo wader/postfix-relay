@@ -1,3 +1,4 @@
+import os
 import re
 import smtplib
 import time
@@ -24,13 +25,62 @@ def poll_until(predicate, timeout=DEFAULT_TIMEOUT, description="condition"):
         time.sleep(0.2)
 
 
+def once_across_workers(tmp_path_factory, name, produce, timeout=600):
+    """Call "produce" once for the whole run, however many workers there are.
+
+    pytest-xdist runs every worker in a process of its own, so a session
+    scoped fixture is set up once per worker rather than once per run. That
+    is what keeps the workers independent and is what one wants for the
+    containers, but not for getting the images they run: the same build
+    would be done several times over, and several pulls of the same base
+    image at the same moment are answered by the registry with a 429 rather
+    than with the image.
+
+    The first worker to create the lock does the work and leaves a marker
+    behind, the others wait for that marker. Without xdist there is nothing
+    to coordinate and "produce" is simply called.
+    """
+    if os.environ.get('PYTEST_XDIST_WORKER') is None:
+        produce()
+        return
+
+    # getbasetemp() is per worker, its parent is shared by all of them.
+    shared = tmp_path_factory.getbasetemp().parent
+    lock = shared / f"{name}.lock"
+    done = shared / f"{name}.done"
+
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL))
+    except FileExistsError:
+        poll_until(done.is_file, timeout=timeout,
+                   description=f"{name} to be made ready by another worker")
+        return
+
+    produce()
+    # Written only once the work is finished, so that a worker seeing it can
+    # rely on the image being there.
+    done.touch()
+
+
 def wait_for_smtp(container, port=25, timeout=DEFAULT_TIMEOUT):
     """Wait until the container answers on the SMTP port.
 
     A log line only tells that the start-up script got that far, postfix can
     still be a moment away from accepting connections.
+
+    A container that has exited is not waited for: "run" stops the container
+    on a configuration it refuses, so sitting out the timeout on one only
+    delays a failure that is already decided, and reports it as a silent
+    relay rather than as the refusal it is.
     """
+    wrapped = container.get_wrapped_container()
+
     def banner():
+        wrapped.reload()
+        if wrapped.status == 'exited':
+            raise AssertionError(
+                f"the container exited with {wrapped.attrs['State']['ExitCode']} "
+                f"instead of answering on port {port}")
         try:
             smtp = smtplib.SMTP(container.get_container_host_ip(),
                                 container.get_exposed_port(port),
@@ -219,12 +269,19 @@ def _dotted_quad(hex_address):
                     for index in range(6, -2, -2))
 
 
-def exit_code_within(container, seconds=15):
+def exit_code_within(container, seconds=5):
     """The code the container exited with, or None if it is still running.
 
     docker's wait endpoint has no notion of "not yet": asking it to wait
     less than the container takes raises a read timeout, which is the
     answer rather than an error here.
+
+    Five seconds rather than fifteen: "run" waits on the daemon it
+    started in the foreground, so it hears about the death immediately and
+    the container is gone 0.2s later, measured. The wait is what a caller
+    pays when the container does *not* stop, which is the case the callers
+    below are documenting, so keeping it near the time the answer actually
+    takes is most of what those tests cost.
     """
     try:
         return container.get_wrapped_container().wait(timeout=seconds)['StatusCode']

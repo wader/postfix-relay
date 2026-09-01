@@ -652,9 +652,16 @@ pip install -r tests/requirements.txt
 pytest
 # Or a single file
 pytest tests/test_dkim.py
+# Or in a single process, which is easier to follow when working on one test
+pytest -n0
 # Exit python virtual environment
 deactivate
 ```
+
+The suite spends its time waiting on containers rather than on the
+processor, so it runs its files several at a time, which is what
+`pytest.ini` asks for. One file at a time takes about nine minutes and
+leaves the machine mostly idle; four at a time takes about two and a half.
 
 The tests build the image and run it, so what they check is the image
 itself: mail is sent to a container and what comes out of it is read back

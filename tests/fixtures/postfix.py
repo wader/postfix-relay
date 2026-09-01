@@ -8,22 +8,24 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.core.image import DockerImage
 
 from tests.conftest import print_log_on_failure
-from tests.helpers import poll_until, wait_for_smtp
+from tests.helpers import once_across_workers, poll_until, wait_for_smtp
 
 ROOT_PATH = os.path.dirname(__file__) + '/../../'
+
+IMAGE_TAG = "postfix-relay:test"
 
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
 
 
 @pytest.fixture(scope="session")
-def postfix_image():
-    """The image under test, built once for the whole session."""
-    image = DockerImage(path=ROOT_PATH, tag="postfix-relay:test")
+def postfix_image(tmp_path_factory):
+    """The image under test, built once for the whole run."""
+    once_across_workers(
+        tmp_path_factory, "postfix-image",
+        lambda: DockerImage(path=ROOT_PATH, tag=IMAGE_TAG).build())
 
-    image.build()
-
-    return str(image)
+    return IMAGE_TAG
 
 
 def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
