@@ -372,7 +372,12 @@ def test_a_stop_during_start_up_is_not_reported_as_a_failure(postfix_factory):
         wait_ready=False)
     wrapped = relay.get_wrapped_container()
 
-    time.sleep(1)
+    # Waited for rather than slept through. "DNS records:" is printed before
+    # the first key is generated and start-up runs for several seconds after
+    # it, so the signal lands inside start-up because the log says start-up is
+    # running -- not because a second happened to be the right guess on the
+    # machine it was written on.
+    wait_for_log(relay, "DNS records:")
     wrapped.stop(timeout=30)
 
     assert exit_code_within(relay, seconds=30) == 0
