@@ -14,13 +14,18 @@ ROOT_PATH = os.path.dirname(__file__) + '/../../'
 
 IMAGE_TAG = "postfix-relay:test"
 
-# An image built outside the suite, for the runs that cannot build their own.
-# Testing a foreign architecture needs buildx to produce the image and the
-# docker daemon to load it, neither of which the builder behind DockerImage
-# does, so CI builds that one itself and names it here. Unset, which is every
-# run on the machine it is meant for, the suite builds the image as it always
-# has.
+# An image built outside the suite, for the runs that cannot build their own:
+# DockerImage builds through the docker daemon, which cannot cross-build, so a
+# foreign architecture has to be built with buildx and loaded first. Unset,
+# which is every run on the machine it is meant for, the suite builds the image
+# as it always has.
 PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
+
+# What that image has to be, as docker reports it: "arm" for the arm/v7 image,
+# "arm64", "amd64". Without this a job that meant to test another architecture
+# and got the runner's own would pass every test it ran and say nothing, which
+# is the one way an emulated run can be worse than no run at all.
+EXPECTED_ARCHITECTURE = os.environ.get('POSTFIX_RELAY_ARCH')
 
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
@@ -34,9 +39,12 @@ def postfix_image(tmp_path_factory):
     one is enough to run the suite against an image the suite did not build.
     """
     if PREBUILT_IMAGE:
-        # Asked for once, here, so that a tag that is not loaded says so
-        # instead of failing every test that tries to start a container.
-        docker.from_env().images.get(PREBUILT_IMAGE)
+        image = docker.from_env().images.get(PREBUILT_IMAGE)
+        architecture = image.attrs['Architecture']
+        if EXPECTED_ARCHITECTURE and architecture != EXPECTED_ARCHITECTURE:
+            raise AssertionError(
+                f"{PREBUILT_IMAGE} is {architecture}, not {EXPECTED_ARCHITECTURE}: "
+                "the tests would have passed against the wrong architecture")
         return PREBUILT_IMAGE
 
     once_across_workers(

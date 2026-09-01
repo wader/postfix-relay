@@ -13,9 +13,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 # The three jobs that run pytest are spelled out rather than written as one
-# matrix, because a matrix appends its values to the job name and the names
-# here are what the required status checks and the Dependabot auto-merge
-# workflow match on. See the comment in dependabot-auto-merge.yml.
+# matrix. They differ in runner, in what they run and in when they run, so a
+# matrix would carry more exceptions than shared lines, and the job names are
+# what the required status checks and the Dependabot auto-merge workflow match
+# on: worth having in front of you. See the comment in dependabot-auto-merge.yml.
 
 jobs:
   event_file:
@@ -135,14 +136,17 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build the arm/v7 image
+        # Bounded for the same reason the test steps are: overrunning the job
+        # timeout cancels the job, and a cancelled job uploads nothing.
+        timeout-minutes: 20
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/arm/v7
-          # One platform at a time, which is all the runner's image store can
-          # hold: it has no room for a manifest list, so a build naming two
-          # platforms cannot be loaded into it at all.
+          # One platform at a time. The runner's docker still keeps images in
+          # the classic store, which has no way to represent a manifest list,
+          # so a build naming two platforms cannot be loaded into it at all.
           load: true
           tags: postfix-relay:test-armv7
           # Read only. ci.yml builds the same three platforms and writes the
@@ -171,7 +175,13 @@ jobs:
         timeout-minutes: 25
         env:
           POSTFIX_RELAY_IMAGE: postfix-relay:test-armv7
-        run: pytest -m smoke --junitxml=junit/test-results.xml
+          # Docker calls the arm/v7 image "arm". Without this the job would
+          # pass against the runner's own amd64 image and report nothing.
+          POSTFIX_RELAY_ARCH: arm
+        # "-n0" overrides pytest.ini: the four smoke tests are in four files,
+        # so the default would put four emulated relays on the runner at once,
+        # against waits that were all measured on a native one.
+        run: pytest -m smoke -n0 --junitxml=junit/test-results.xml
 
       - name: Upload Test Results
         if: (!cancelled())

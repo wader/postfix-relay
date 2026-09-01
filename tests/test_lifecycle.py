@@ -21,8 +21,19 @@ def health(container):
 
 @pytest.mark.smoke
 def test_the_container_reports_healthy(postfix):
-    assert poll_until(lambda: health(postfix) == 'healthy', timeout=60,
-                      description="the container to report healthy")
+    try:
+        assert poll_until(lambda: health(postfix) == 'healthy', timeout=60,
+                          description="the container to report healthy")
+    except AssertionError:
+        # Docker keeps what every probe printed and exited with, and a timeout
+        # on its own says only that none of them passed. That is the whole
+        # difference between "the check is too slow here" and "a daemon is
+        # down", which is the question an emulated run exists to answer.
+        wrapped = postfix.get_wrapped_container()
+        wrapped.reload()
+        for probe in wrapped.attrs['State']['Health'].get('Log', []):
+            print(f"health probe exited {probe['ExitCode']}: {probe['Output']}")
+        raise
 
 
 def test_relaying_still_works_after_an_unclean_stop(postfix_factory, mailpit):

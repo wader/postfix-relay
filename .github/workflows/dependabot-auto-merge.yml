@@ -11,9 +11,9 @@
 # "Pytest (arm/v7, emulated)", "Event File" and "Test Results"; "ci" and
 # "test" are workflows and never report a check of their own.
 #
-# "Pytest (arm/v7, emulated)" reports "skipped" on a pull request that is not
-# labelled "test-emulated", which is nearly all of them, so requiring it would
-# gate on a check that did not run rather than on one that passed.
+# "Pytest (arm/v7, emulated)" does not run on a pull request unless it is
+# labelled "test-emulated", which is nearly all of them, so it is not a
+# candidate for the required list whatever github makes of a skipped check.
 
 name: Dependabot auto-merge
 

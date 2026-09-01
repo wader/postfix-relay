@@ -683,10 +683,14 @@ another CPU architecture. Building one needs the emulators registered and a
 builder that can cross-build, which the default one cannot:
 
 ```bash
-docker run --privileged --rm tonistiigi/binfmt --install arm
-docker buildx create --use --name cross
-docker buildx build --platform linux/arm/v7 --load -t postfix-relay:test-armv7 .
-POSTFIX_RELAY_IMAGE=postfix-relay:test-armv7 pytest -m smoke
+# The same emulator CI pins, so a failure here means the same thing there
+docker run --privileged --rm tonistiigi/binfmt:qemu-v10.2.3-68 --install arm
+# Named rather than "--use", which would make it your default for everything
+docker buildx create --name cross --bootstrap
+docker buildx build --builder cross --platform linux/arm/v7 --load \
+  -t postfix-relay:test-armv7 .
+POSTFIX_RELAY_IMAGE=postfix-relay:test-armv7 POSTFIX_RELAY_ARCH=arm \
+  pytest -m smoke -n0
 ```
 
 CI runs the whole suite on `amd64` and on `arm64`, both natively. There is no
