@@ -428,3 +428,24 @@ def test_a_key_that_could_not_be_generated_stops_the_container(postfix_factory):
 
     assert exit_code_within(relay, seconds=20) == 1
     assert 'Could not generate a DKIM key' in container_stderr(relay)
+
+
+def test_a_key_that_cannot_be_read_stops_the_container(postfix_factory):
+    """A key that is there but unusable takes the other door.
+
+    An empty, truncated or half-restored <selector>.private exists, so the
+    generation above never runs and never looks at it. opendkim then starts
+    with nothing loaded and the relay goes on sending unsigned, healthy and
+    quiet, which is the outcome the refusal exists to prevent.
+    """
+    relay = postfix_factory(
+        env={'OPENDKIM_DOMAINS': 'example.com=sel1'},
+        files={'/etc/opendkim/keys/example.com/sel1.private': ""},
+        wait_ready=False)
+
+    # Generous rather than tight: the container does start up as far as the
+    # key before it refuses, and the suite runs four files at a time, so 20
+    # seconds was enough alone and not always enough under that load. It
+    # returns as soon as the container exits, so the bound costs nothing.
+    assert exit_code_within(relay, seconds=45) == 1
+    assert 'cannot be read as a private key' in container_stderr(relay)

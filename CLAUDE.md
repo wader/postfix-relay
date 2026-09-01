@@ -31,7 +31,9 @@ why merge commits name someone else's namespace.
 | `run` | The entrypoint. Resolves `<NAME>_FILE` secrets, turns `POSTFIX_*`, `POSTFIXMASTER_*`, `POSTMAP_*`, `OPENDKIM_*`, `POSTSRSD_*`, `RSYSLOG_*`, `SASL_Passwds` and `POSTMASTER_ADDRESS` into config, starts the daemons, asks postfix for an SMTP greeting, then runs a `pgrep`-polling supervision loop. Nearly all behaviour lives here. |
 | `healthcheck` | `pgrep`s `master`, checks a listening socket for every `inet` service in `postconf -M`, then `rsyslogd` always, `opendkim`/`postsrsd` whenever the environment *or the artefacts start-up left behind* say so, and `saslauthd` when `SASL_Passwds` is set. |
 | `pytest.ini` | `addopts = -n auto --dist loadfile --maxprocesses 4` and one registered marker, `smoke`. No `testpaths`, no `filterwarnings`, no `xfail_strict`. |
-| `.dockerignore` | Keeps `.git`, `README.md`, `LICENSE`, `tests` and `pytest.ini` out of the build context. |
+| `.dockerignore` | Keeps `.git`, `README.md`, `LICENSE`, `tests`, `pytest.ini`, `CLAUDE.md` and `.claude` out of the build context. |
+| `.claude/settings.json` | Registers the `SessionStart` hook below. Nothing else. |
+| `.claude/hooks/session-start.sh` | Starts the docker daemon and installs `tests/requirements.txt`, because a Claude Code on the web container has neither and both gates need them. Guarded on `CLAUDE_CODE_REMOTE=true`, so a local checkout is untouched, and best-effort: a failed step explains itself on stderr and the hook still exits 0, so check stderr before believing a build or test failure. |
 | `tests/__init__.py` | Empty; makes `tests` a package, which is what lets `conftest.py` name plugins as `tests.fixtures.*` and lets modules do `from tests.helpers import …`. pytest therefore has to be run from the repo root. There is no `tests/fixtures/__init__.py`. |
 | `tests/conftest.py` | Registers the four fixture modules as pytest plugins, and defines the failure plumbing: `print_log_on_failure`, an autouse `shared_container_logs` fixture, and a `pytest_runtest_makereport` wrapper hook that stashes the report on the item. |
 | `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py`, and by three of the four fixture modules. `file_missing` is defined and never called. |
@@ -40,7 +42,7 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/postfix.py` | Six fixtures: `postfix_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH`. |
 | `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, pinned at `axllent/mailpit:<tag>`: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
-| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`. The README's per-file table covers all but `test_qshape.py` and `test_secrets.py`. |
+| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
 | `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
@@ -62,8 +64,10 @@ Dockerfile ──FROM──> debian:trixie-<date>-slim
     ├──COPY──> run          -> /root/run          <- CMD
     └──COPY──> healthcheck  -> /root/healthcheck  <- HEALTHCHECK
 
-.dockerignore excludes .git, README.md, LICENSE, tests, pytest.ini
-    => nothing under tests/, and not pytest.ini, can invalidate the build cache
+.dockerignore excludes .git, README.md, LICENSE, tests, pytest.ini,
+                     CLAUDE.md, .claude
+    => nothing under tests/, and neither pytest.ini nor this document, can
+       invalidate the build cache
 
 pytest.ini ──addopts──> pytest-xdist   (-n auto --dist loadfile --maxprocesses 4)
     => a pytest without the plugin does not start at all
@@ -142,14 +146,15 @@ the rootdir), and no `filterwarnings` or `-W error` anywhere in the tree, so
 warnings are reported and cannot fail a run. Some come from testcontainers
 itself and cannot be fixed here.
 
-To exercise `arm/v7` locally — the only architecture the suite cannot build on
-an ordinary machine — follow the cross-build recipe in
+To exercise `arm/v7` locally — the suite builds through the docker daemon, so
+it only ever builds the host's — follow the cross-build recipe in
 [README.md](README.md#testing). It pins the same binfmt image CI does, so a
 failure there means the same thing.
 
-There is no unit test layer: every test starts real containers. When a test
-fails, `conftest.py` prints the logs of the containers it used, so
-`-o log_cli=true` is rarely what you want.
+There is no unit test layer: nothing runs without a docker daemon. Most tests
+start a real relay; the exceptions are in `test_image.py`, which only
+`docker inspect`s the built image. When a test fails, `conftest.py` prints the
+logs of the containers it used, so `-o log_cli=true` is rarely what you want.
 
 ### Build
 
@@ -173,11 +178,13 @@ shellcheck -S error run healthcheck   # what CI runs; exits 0
 shellcheck run healthcheck            # everything, at the stock threshold
 ```
 
-`run` and `healthcheck` are the only two shell scripts, and
+`run` and `healthcheck` are the two scripts that go into the image, and
 `.github/workflows/lint.yml` gates them at `-S error` on every pull request —
 the **ShellCheck** check in the table below. That threshold is not a stepping
 stone to a stricter one: it is the only one the scripts pass, and the findings
-between it and the default are either noise or deliberate.
+between it and the default are either noise or deliberate. The third shell
+script in the tree, the hook under `.claude/`, is not gated: it is no part of
+what ships.
 
 There is still no linter *configuration* anywhere in the repo (no
 `.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
@@ -267,8 +274,8 @@ Notes a contributor will hit:
   ("Stop taking ownership of /var/mail on start-up", "Ask postfix for a
   greeting before handing over"), a blank line, then a body that explains
   *why*, what the alternative would have cost, and how the change was verified
-  against a built image ("Verified on the built image: …" and "Tested on the
-  built image: …" are equally common). Reference issues with `Closes #NNN` /
+  against a built image — "Tested on the built image: …" and "Verified on
+  the built image: …" are both in use. Reference issues with `Closes #NNN` /
   `Fixes #NNN`. The commit bodies here are unusually detailed and are the
   primary record of the decisions listed below — keep that up. Pull requests
   are merged with merge commits.
@@ -277,11 +284,12 @@ Notes a contributor will hit:
 - **License headers.** Not used. The project is MIT ([LICENSE](LICENSE)); no
   source file carries a header and `SPDX` appears nowhere in the tree. Do not
   add one to new files.
-- **Shell style** (`run`, `healthcheck` — the only two shell scripts, both
-  `#!/bin/bash`). No `set -e` (see below), function brace on its own line,
-  `[ ... ] ; then` with spaces around the `;`, four-space bodies inside
-  functions and two-space bodies in top-level blocks, and a comment above each
-  block explaining the intent rather than the syntax.
+- **Shell style.** The three shell scripts — `run`, `healthcheck` and
+  `.claude/hooks/session-start.sh` — are all `#!/bin/bash`. No `set -e` (see
+  below), function brace on its own line, `[ ... ] ; then` with spaces around
+  the `;`, four-space bodies inside functions and two-space bodies in
+  top-level blocks, and a comment above each block explaining the intent
+  rather than the syntax.
 - **Tests.** Behaviour the README promises is pinned by a test. Three rules the
   plumbing does not enforce for you:
   - a fixture that stops a container calls `print_log_on_failure` *first*,
@@ -396,8 +404,9 @@ changing any of them.
    container re-runs the whole script over a filesystem that already has its
    results, which is also why `run` removes the four stale pid files near the
    top. Note that refusing to relay is now the normal response to a daemon that
-   will not start or has died: `run` exits 1 from six places, and the SRS stop
-   of invariant 3 is one of them, not the exception.
+   will not start or has died: `run` exits 1 wherever a daemon it configured
+   cannot do what it was configured for, and the SRS stop of invariant 3 is one
+   of those rather than the exception.
 
 9. **`run` ends in a `pgrep -x` polling loop, not a bare `wait`.** rsyslogd is
    the only daemon that is a child of the script, so the bare `wait` this
@@ -413,8 +422,12 @@ changing any of them.
    death is noticed at once. `stopDaemons` is guarded by `$stopped`, runs on
    both ways out, and stops rsyslogd last and waits for it so the others'
    parting words still reach the container log; a daemon that dies on its own
-   exits 1 so an `on-failure` restart policy has something to act on.
-   (issue #176, commit `cc23882`)
+   exits 1 so an `on-failure` restart policy has something to act on. The
+   handler itself ends in `exit 0`, which is not a lost failure code: without
+   it a container signalled while it was still starting resumed start-up from
+   where the signal interrupted it and then reported the daemons it had just
+   stopped as daemons that would not start.
+   (issue #176, commit `cc23882`; the handler's exit, commit `e9017b0`)
 
 10. **The saslauthd mux directory is created with
     `install -d -o root -g sasl -m 710`, below the
@@ -481,7 +494,7 @@ changing any of them.
 
 17. **`secretsFromFiles` runs before every config loop, and uses `printf -v`.**
     It has to run first so the loops see the resolved value and not the `_FILE`
-    variable; `printf -v "$var" '%s' "$(< "$file")"` is used because
+    variable; `printf -v "$var" '%s' "$(< "${!file}")"` is used because
     `$(< file)` drops trailing newlines, which a secret file is likely to end
     with and a password is unlikely to contain. An unreadable path exits 1
     rather than starting a relay without the credential. The mechanism covers

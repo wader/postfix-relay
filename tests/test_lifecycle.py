@@ -330,6 +330,26 @@ def test_a_relay_that_does_not_serve_loopback_still_starts(postfix_factory, mail
     assert mailpit.wait_for_message('off loopback')
 
 
+def test_a_relay_that_names_its_interfaces_with_a_macro_still_starts(postfix_factory,
+                                                                     mailpit):
+    """inet_interfaces is often written "$myhostname" rather than spelled out.
+
+    postconf hands back what main.cf holds unless it is asked to expand, so
+    reading the setting without that gives the literal "$myhostname" to dial:
+    five refused connections and a container that exits 1 for a relay serving
+    every client it has.
+    """
+    relay = postfix_factory(env={'POSTFIX_myhostname': 'relay-by-macro',
+                                 'POSTFIX_inet_interfaces': '$myhostname'},
+                            kwargs={'hostname': 'relay-by-macro'})
+
+    assert exit_code_within(relay, seconds=20) is None
+
+    send(relay, subject='named by macro')
+
+    assert mailpit.wait_for_message('named by macro')
+
+
 def test_the_stop_path_does_not_claim_daemons_it_never_signalled(postfix_factory):
     """Two of the three init scripts cannot find their daemon in a container.
 
