@@ -45,11 +45,13 @@ why merge commits name someone else's namespace.
 | `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
+| `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment is also where the check names are recorded. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`. |
 
-There is no `CONTRIBUTING.md`, no linter config of any kind and no per-file
-license header — see [Conventions](#conventions).
+There is no `CONTRIBUTING.md`, no linter *config* of any kind — `lint.yml`
+passes its one flag on the command line — and no per-file license header — see
+[Conventions](#conventions).
 
 ## Dependency graph
 
@@ -166,19 +168,32 @@ until CI runs.
 
 ### Lint
 
-**There is none.** No linter config exists anywhere in the repo (no
-`.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
-`.flake8`, `.ruff.toml` or `.pre-commit-config.yaml`), and no workflow runs
-one.
-
-For reference, with shellcheck 0.9.0 and stock defaults — there is no
-`.shellcheckrc` and no in-file `# shellcheck disable=` anywhere, so nothing is
-suppressed:
-
 ```bash
-shellcheck run          # 15 findings: 1 warning, 9 info, 5 style; exits 1
-shellcheck healthcheck  # 1 finding: SC2086 (info); exits 1
-shellcheck -S error run healthcheck   # exits 0 — the only clean threshold
+shellcheck -S error run healthcheck   # what CI runs; exits 0
+shellcheck run healthcheck            # everything, at the stock threshold
+```
+
+`run` and `healthcheck` are the only two shell scripts, and
+`.github/workflows/lint.yml` gates them at `-S error` on every pull request —
+the **ShellCheck** check in the table below. That threshold is not a stepping
+stone to a stricter one: it is the only one the scripts pass, and the findings
+between it and the default are either noise or deliberate.
+
+There is still no linter *configuration* anywhere in the repo (no
+`.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
+`.flake8`, `.ruff.toml` or `.pre-commit-config.yaml`) and no in-file
+`# shellcheck disable=`, so nothing is suppressed: what the gate lets through,
+it lets through because of the threshold alone.
+
+With shellcheck 0.11.0, which is the version `lint.yml` pins:
+
+```
+run:68:5           SC2034 (warning)  try appears unused
+run:166:23         SC2308 (note)     'expr match' has unspecified results
+run:422,423        SC2016 (note)     expressions don't expand in single quotes
+run:422            SC2028 (note)     echo may not expand escape sequences
+run:432,435,438    SC2086 (note)     double quote to prevent word splitting
+healthcheck:32:46  SC2086 (note)     double quote to prevent word splitting
 ```
 
 Two of those must not be "fixed": the `SC2034` in `awaitGreeting` is a retry
@@ -186,18 +201,21 @@ counter the loop body has no reason to read (the identical construct in
 `awaitProcess` is not flagged, which is a quirk of the tool), and the `SC2086`
 in `healthcheck` is deliberate word-splitting — `listening()` builds
 `proc="/proc/net/tcp /proc/net/tcp6"` and awk must receive both paths. Quoting
-it, as shellcheck suggests, breaks IPv6 listener detection.
+it, as shellcheck suggests, breaks IPv6 listener detection. `-S warning` fails
+on the first of those, which is why the gate is at `-S error` and not a notch
+higher.
 
-Counts drift with every shellcheck release and nothing here pins one, so treat
-them as a snapshot. Nothing enforces any of this: do not add a lint gate as a
-side effect of an unrelated change — `-S warning` would fail today.
+Counts and line numbers drift with every shellcheck release, so treat the list
+as a snapshot; the pin in `lint.yml` is what keeps a release from moving them
+under an unrelated pull request. Nothing bumps that pin — moving to a newer
+shellcheck is a deliberate edit, the way a base-image suite change is.
 
 ## What blocks a pull request
 
-Three workflow files carry a `pull_request` trigger, but `dependabot-auto-merge.yml`
+Four workflow files carry a `pull_request` trigger, but `dependabot-auto-merge.yml`
 is a no-op for anything not opened by `dependabot[bot]` — its single job has no
 display `name:`, so on an ordinary pull request it appears as a skipped
-`auto-merge` check. The five that can actually fail are:
+`auto-merge` check. The six that can actually fail are:
 
 | Check | From | What it does |
 | --- | --- | --- |
@@ -205,6 +223,7 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 | **Pytest** | `test.yml` | `ubuntu-latest`, Python 3.13, `pip install -r tests/requirements.txt`, `pytest --junitxml=junit/test-results.xml`. |
 | **Pytest (arm64)** | `test.yml` | The same, natively, on `ubuntu-24.04-arm`. |
 | **Event File** | `test.yml` | Uploads the triggering event payload for the reporter. |
+| **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error run healthcheck`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
 A sixth, **Pytest (arm/v7, emulated)**, runs only on `master`, on a manual
@@ -237,7 +256,10 @@ Notes a contributor will hit:
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
   still break without a change in this repo.
-- No workflow runs a linter, so nothing lint-shaped blocks a merge.
+- **ShellCheck is a gate, but a narrow one.** It fails only on shellcheck
+  errors in `run` and `healthcheck` — nothing about python, yaml, the
+  `Dockerfile` or the README is linted anywhere. Do not widen it as a side
+  effect of an unrelated change: `-S warning` fails on master today.
 
 ## Conventions
 
