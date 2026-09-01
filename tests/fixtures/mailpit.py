@@ -32,7 +32,7 @@ mailpit_module.wait_for_logs = functools.partial(
 from tests.conftest import print_log_on_failure
 from tests.helpers import once_across_workers, poll_until
 
-IMAGE = "axllent/mailpit:v1.27"
+IMAGE = "axllent/mailpit:v1.27.11"
 
 
 class Mailpit:
