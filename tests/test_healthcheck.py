@@ -4,7 +4,7 @@ import time
 
 from testcontainers.core.container import DockerContainer
 
-from tests.helpers import healthcheck_after_stopping
+from tests.helpers import container_log, healthcheck_after_stopping, wait_for_log
 
 HEALTHCHECK = "/root/healthcheck"
 SUBMISSION = "submission/inet=submission inet n - y - - smtpd"
@@ -243,9 +243,14 @@ def test_the_check_writes_nothing_to_the_log(relay_factory):
     them is what keeps a connect and a disconnect out of the log each time.
     """
     relay = relay_factory()
-    before = relay.get_logs()[0].decode()
+    # rsyslogd writes its own start line once it has finished starting, which
+    # is after "run" has started postfix and can be after the relay answers,
+    # the moment the factory calls it started. Snapshotting before that line
+    # lands leaves it to arrive during the loop below, where it reads as a
+    # line the health check wrote.
+    before = wait_for_log(relay, "rsyslogd:")
 
     for _ in range(5):
         assert run_healthcheck(relay, expected=0)[0] == 0
 
-    assert relay.get_logs()[0].decode() == before
+    assert container_log(relay) == before
