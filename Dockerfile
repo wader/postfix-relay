@@ -36,12 +36,19 @@ RUN \
 # Try to use TLS when sending to other smtp servers.
 # No TLS for connecting clients, trust docker network to be safe
 # IPv4 only, because the packaged default is whatever the build machine had.
+# The trust store ca-certificates installs is named as the CA file, or postfix
+# has nothing to check a server certificate against and the two security levels
+# that authenticate the next hop, "verify" and "secure", cannot be used at all.
+# CAfile rather than CApath: the smtp client runs chrooted in the queue and
+# opens this while it is still root, before the chroot, which a directory of
+# hashed links would not survive.
 ENV \
   POSTFIX_myhostname=hostname \
   POSTFIX_mydestination=localhost \
   POSTFIX_mynetworks=0.0.0.0/0 \
   POSTFIX_inet_protocols=ipv4 \
   POSTFIX_smtp_tls_security_level=may \
+  POSTFIX_smtp_tls_CAfile=/etc/ssl/certs/ca-certificates.crt \
   POSTFIX_smtpd_tls_security_level=none \
   OPENDKIM_Socket=inet:12301@localhost \
   OPENDKIM_Mode=sv \
