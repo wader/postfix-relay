@@ -316,6 +316,15 @@ environment:
   - POSTFIX_mynetworks=127.0.0.0/8,172.16.0.0/12
 ```
 
+Addresses are not something to rely on under swarm. `docker stack deploy`
+publishes a port through the routing mesh, which source-NATs, so postfix sees
+the ingress network for every client -- `10.0.0.2` where the client really was
+`192.168.1.192`. `mynetworks` then matches nobody, and widening it to cover the
+ingress network would admit everyone who can reach the published port, which is
+the opposite of the point. Publish with `mode: host` to keep the client
+addresses, or authenticate instead: `permit_sasl_authenticated` does not care
+where the client appears to come from.
+
 or by requiring authentication, using the setup described below and refusing
 everyone else:
 
