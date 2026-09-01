@@ -6,6 +6,9 @@ from testcontainers.core.container import DockerContainer
 
 HEALTHCHECK = "/root/healthcheck"
 SUBMISSION = "submission/inet=submission inet n - y - - smtpd"
+# The same service with its process count limit lifted, which postfix starts
+# and binds exactly as it does the one above.
+MAXPROC_ZERO = SUBMISSION.replace("n - y - -", "n - y - 0")
 
 def start_relay(image, **env):
     container = DockerContainer(image=image)
@@ -194,19 +197,28 @@ def test_a_postfix_that_is_not_running_is_unhealthy(relay_factory):
     assert 'postfix master is not running' in output
 
 
-def test_a_service_turned_off_with_maxproc_zero_is_not_expected_to_listen(relay_factory):
-    """Setting maxproc to 0 is how a service in master.cf is turned off.
+def test_a_service_with_no_process_limit_is_still_expected_to_listen(relay_factory):
+    """"maxproc 0" means no process count limit, not "turned off".
 
-    A check that only looked for "inet" services would report a relay whose
-    submission port was deliberately disabled as broken.
+    Postfix binds the port either way, so skipping those services would have
+    left a submission port that never opened unnoticed. There is no field in
+    master.cf that disables a service: one that really is disabled is removed
+    with "postconf -MX", and postconf -M then does not print it at all.
+
+    Written the way test_configured_but_unopened_port_is_unhealthy is, so
+    that it fails if the exclusion is ever put back: the port is genuinely
+    closed until the reload, which is the state an exclusion would hide.
     """
     relay = relay_factory()
 
-    relay.exec(["postconf", "-M", "-e", "submission/inet=" + SUBMISSION.split('=', 1)[1]
-                .replace('n - y - -', 'n - y - 0')])
+    relay.exec(["postconf", "-M", "-e", MAXPROC_ZERO])
+
+    exit_code, output = run_healthcheck(relay, expected=1)
+    assert exit_code == 1
+    assert 'not listening on submission' in output
+
     relay.exec("postfix reload")
 
-    assert 'submission' in relay.exec(["postconf", "-M"]).output.decode()
     assert run_healthcheck(relay, expected=0)[0] == 0
 
 

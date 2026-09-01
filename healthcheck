@@ -35,9 +35,12 @@ listening()
 running master || fail "postfix master is not running"
 
 # Follow master.cf rather than assuming port 25, so a submission port added
-# with a POSTFIXMASTER_ variable is checked too and a service turned off with
-# maxproc 0 is not.
-for service in $(postconf -M | awk '$2 == "inet" && $7 != "0" { print $1 }') ; do
+# with a POSTFIXMASTER_ variable is checked too. Every inet service is looked
+# at: master.cf has no field that turns one off. "maxproc 0" means no process
+# count limit rather than disabled, and postfix binds the port either way; a
+# service that really is disabled is removed with "postconf -MX" and postconf
+# stops printing it at all.
+for service in $(postconf -M | awk '$2 == "inet" { print $1 }') ; do
   endpoint="${service##*:}"
   port=$(getent services "$endpoint" | awk '{ sub("/.*", "", $2) ; print $2 }')
   listening "${port:-$endpoint}" || fail "postfix is not listening on $service"
