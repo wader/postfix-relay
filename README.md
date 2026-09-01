@@ -539,7 +539,28 @@ mail.
 
 <!-- LOGGING -->
 ## Logging
-By default container only logs to stdout. If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
+By default container only logs to stdout.
+
+`RSYSLOG_TIMESTAMP` decides what those lines look like. It defaults to `no`,
+which leaves them as the bare message:
+
+```
+postfix/smtpd[195]: connect from unknown[172.18.0.1]
+```
+
+Docker records a timestamp for every line it collects, so `docker logs -t`
+still shows one and nothing is lost. Set it to `yes` when something reading the
+log parses the message itself and expects a timestamp and a hostname in it:
+
+```
+2026-08-04T16:37:42.344044+00:00 f5ffdf0ff6bf postfix/smtpd[195]: connect from unknown[172.18.0.1]
+```
+
+It applies to the container log and to `/var/log/mail.log`, but not to a
+`.conf` file of your own in `/etc/rsyslog.d`, which keeps the rsyslog default
+format, nor to remote forwarding, which has `RSYSLOG_REMOTE_TEMPLATE` below.
+
+If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
 
 ```
 environment:
