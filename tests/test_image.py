@@ -245,7 +245,7 @@ def test_the_package_lists_were_cleaned_up(image_shell):
 
 
 def test_the_image_is_a_single_debian_release(image_shell):
-    """The pinned base image, which "bump" keeps up to date."""
+    """The pinned base image, which dependabot keeps up to date."""
     exit_code, output = image_shell("cat /etc/debian_version")
 
     assert exit_code == 0
