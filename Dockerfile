@@ -35,10 +35,12 @@ RUN \
 # Open relay, trust docker links for firewalling.
 # Try to use TLS when sending to other smtp servers.
 # No TLS for connecting clients, trust docker network to be safe
+# IPv4 only, because the packaged default is whatever the build machine had.
 ENV \
   POSTFIX_myhostname=hostname \
   POSTFIX_mydestination=localhost \
   POSTFIX_mynetworks=0.0.0.0/0 \
+  POSTFIX_inet_protocols=ipv4 \
   POSTFIX_smtp_tls_security_level=may \
   POSTFIX_smtpd_tls_security_level=none \
   OPENDKIM_Socket=inet:12301@localhost \
