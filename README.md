@@ -678,8 +678,11 @@ the few things tests keep doing, like waiting for a mail or reading back a
 postfix setting.
 
 Set `POSTFIX_RELAY_IMAGE` to run against an image that is already built
-instead of building one, which is how the suite is pointed at an image for
-another CPU architecture. Building one needs the emulators registered and a
+instead of building one. It is taken only for an architecture this machine
+cannot build, which is the whole reason it exists: building from the
+`Dockerfile` is what makes the suite test the tree it is run in, and naming an
+image it could have built is refused rather than quietly testing whatever was
+left in the image store. Building one needs the emulators registered and a
 builder that can cross-build, which the default one cannot:
 
 ```bash

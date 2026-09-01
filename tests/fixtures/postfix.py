@@ -19,6 +19,11 @@ IMAGE_TAG = "postfix-relay:test"
 # foreign architecture has to be built with buildx and loaded first. Unset,
 # which is every run on the machine it is meant for, the suite builds the image
 # as it always has.
+#
+# Only accepted for an architecture this machine cannot build, which is the
+# whole of the case for having it. Building from the Dockerfile is what makes
+# the suite test the tree it is run in rather than whatever was left in the
+# image store, and that is not worth giving up anywhere it can still be done.
 PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
 
 # What that image has to be, as docker reports it: "arm" for the arm/v7 image,
@@ -39,12 +44,22 @@ def postfix_image(tmp_path_factory):
     one is enough to run the suite against an image the suite did not build.
     """
     if PREBUILT_IMAGE:
-        image = docker.from_env().images.get(PREBUILT_IMAGE)
+        client = docker.from_env()
+        image = client.images.get(PREBUILT_IMAGE)
         architecture = image.attrs['Architecture']
+
+        if architecture == client.version()['Arch']:
+            raise AssertionError(
+                f"POSTFIX_RELAY_IMAGE names a {architecture} image, which this "
+                "machine can build: the suite builds from the Dockerfile so "
+                "that what it tests is what is in the tree. It takes a "
+                "prebuilt image only where the docker builder cannot make one.")
+
         if EXPECTED_ARCHITECTURE and architecture != EXPECTED_ARCHITECTURE:
             raise AssertionError(
                 f"{PREBUILT_IMAGE} is {architecture}, not {EXPECTED_ARCHITECTURE}: "
                 "the tests would have passed against the wrong architecture")
+
         return PREBUILT_IMAGE
 
     once_across_workers(
