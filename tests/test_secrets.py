@@ -10,7 +10,8 @@ import pytest
 
 from testcontainers.community.mailpit import MailpitUser
 
-from tests.helpers import container_exec, container_log, poll_until, send
+from tests.helpers import (container_exec, container_log,
+                           healthcheck_after_stopping, send)
 
 UPSTREAM = '[secrets-upstream]:1025'
 USER, PASSWORD = 'relay', 's3cret'
@@ -26,15 +27,6 @@ def container_stderr(container):
 def healthcheck(container):
     """Run the image health check, which only sees the container environment."""
     return container.exec(["/root/healthcheck"])
-
-
-def wait_for_unhealthy(container, timeout=15):
-    """A killed daemon takes a moment to go away, and docker retries anyway."""
-    def failed():
-        result = healthcheck(container)
-        return result if result.exit_code != 0 else None
-
-    return poll_until(failed, timeout=timeout, description="the health check to fail")
 
 
 @pytest.fixture
@@ -116,9 +108,8 @@ def test_a_domain_list_from_a_file_is_watched_by_the_health_check(postfix_factor
 
     assert healthcheck(relay).exit_code == 0
 
-    relay.exec(["pkill", "-x", "opendkim"])
-
-    assert 'relayed unsigned' in wait_for_unhealthy(relay).output.decode()
+    assert 'relayed unsigned' in \
+        healthcheck_after_stopping(relay, "opendkim").output.decode()
 
 
 def test_an_srs_domain_from_a_file_is_watched_by_the_health_check(postfix_factory):
@@ -127,6 +118,5 @@ def test_an_srs_domain_from_a_file_is_watched_by_the_health_check(postfix_factor
 
     assert healthcheck(relay).exit_code == 0
 
-    relay.exec(["pkill", "-x", "postsrsd"])
-
-    assert 'not rewritten' in wait_for_unhealthy(relay).output.decode()
+    assert 'not rewritten' in \
+        healthcheck_after_stopping(relay, "postsrsd").output.decode()

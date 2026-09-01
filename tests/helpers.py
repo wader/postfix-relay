@@ -109,6 +109,37 @@ def send(container, port=25, sender="sender@example.com", recipients=("receiver@
     return subject
 
 
+def healthcheck_after_stopping(container, daemon, stop=None, timeout=10):
+    """Stop a daemon and read what the health check then says, in one exec.
+
+    The supervision loop in "run" stops the container about a second after
+    it notices a daemon is gone, and it notices within a poll interval of
+    the daemon actually exiting -- which is not the same moment as the
+    signal, since opendkim takes about three seconds to shut down. That
+    leaves roughly two seconds between the verdict this asserts and the
+    container going away.
+
+    Polling the check from the outside spends that window on docker round
+    trips, and losing it does not fail on the assertion: the next exec
+    lands on a container that is gone and raises a docker error instead.
+    Killing, waiting and running the check inside the container is one
+    exec, issued while the container is certainly still up, so the whole
+    race is the tail of a single call.
+
+    "timeout" bounds the wait for the daemon to go. Running the check
+    anyway afterwards is deliberate: a daemon that never went reports
+    healthy, which fails on the assertion the caller wrote rather than on
+    a timeout that says nothing about what the check would have said.
+    """
+    return container.exec([
+        "sh", "-c",
+        f'{stop or f"pkill -x {daemon}"} ; '
+        f'for _ in $(seq {timeout * 10}) ; do '
+        f'pgrep -x {daemon} > /dev/null || break ; sleep 0.1 ; '
+        f'done ; '
+        f'/root/healthcheck'])
+
+
 def container_exec(container, command):
     """Run a command in the container and return its output, failing on a non zero exit."""
     result = container.exec(command)
