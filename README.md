@@ -117,9 +117,17 @@ and remote servers should see: it is used for the 220 greeting and HELO, and
 it also affects `Received` headers and the envelope sender of mail postfix
 generates itself.
 
-The image keeps Debian's `inet_protocols = ipv4`, so it neither accepts
+The image ships `POSTFIX_inet_protocols=ipv4`, so it neither accepts
 connections nor delivers mail over IPv6. Set `POSTFIX_inet_protocols=all` if
-your docker network has IPv6, or recipients you send to are IPv6 only.
+your docker network has IPv6, or recipients you send to are IPv6 only. Note
+that the shipped `POSTFIX_mynetworks=0.0.0.0/0` covers no IPv6 address, so
+turning IPv6 on means widening that too, or clients reaching the relay over
+IPv6 are refused with `Relay access denied`.
+
+The value is set here rather than left to the Debian package, which writes it
+when it is installed from the IPv6 support of the machine doing the build: the
+same Dockerfile otherwise produces a dual stack image on one host and an IPv4
+only image on another.
 
 ### Postfix master.cf variables
 

@@ -110,17 +110,17 @@ def test_no_optional_daemon_is_running(postfix):
         assert not process_running(postfix, daemon), daemon
 
 
-def test_the_relay_answers_over_ipv4(postfix):
-    """Which protocols the relay speaks is decided when the image is built.
+def test_the_relay_speaks_ipv4_only(postfix):
+    """And the same everywhere, whoever built the image.
 
-    Debian's postfix postinst writes inet_protocols into main.cf from the
-    IPv6 support of the machine running the build, and nothing in this
-    repository pins it: an image built on a host without IPv6 is ipv4 only,
-    and the published one is dual stack, which is not what the README says.
-    What holds either way is that the relay answers over IPv4, which is what
-    a docker network uses unless it was created with IPv6 turned on.
+    Debian's postfix postinst writes inet_protocols into main.cf at install
+    time from the IPv6 support of the machine running the build, so the same
+    Dockerfile used to produce a dual stack image on a runner and an IPv4
+    only one elsewhere. The Dockerfile pins it, which is what makes the
+    README's "set POSTFIX_inet_protocols=all if your docker network has
+    IPv6" a choice rather than a coin toss.
     """
-    assert postconf(postfix, 'inet_protocols') in ('ipv4', 'all')
+    assert postconf(postfix, 'inet_protocols') == 'ipv4'
     assert 25 in listening_ports(postfix)
 
 

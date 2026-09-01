@@ -22,6 +22,9 @@ DEFAULT_ENVIRONMENT = [
     ('POSTFIX_myhostname', 'hostname'),
     ('POSTFIX_mydestination', 'localhost'),
     ('POSTFIX_mynetworks', '0.0.0.0/0'),
+    # Pinned rather than inherited: the packaged value is written at build
+    # time from the IPv6 support of the machine doing the build.
+    ('POSTFIX_inet_protocols', 'ipv4'),
     ('POSTFIX_smtp_tls_security_level', 'may'),
     ('POSTFIX_smtpd_tls_security_level', 'none'),
     # OpenDKIM: everything but the domains, which is what turns signing on.
