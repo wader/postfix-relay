@@ -5,6 +5,8 @@ it hands the work to unprivileged users itself and needs very little of what
 docker grants a container by default.
 """
 
+import time
+
 import pytest
 
 from tests.helpers import container_exec, send
@@ -55,3 +57,21 @@ def test_dropping_everything_stops_the_container(postfix_factory):
     relay = postfix_factory(kwargs={'cap_drop': ['ALL']}, wait_ready=False)
 
     assert relay.get_wrapped_container().wait(timeout=60)['StatusCode'] == 1
+
+
+def test_the_hardened_relay_stops_gracefully(hardened_relay):
+    """Stopping is the operation most likely to miss a capability.
+
+    "stopDaemons" signals daemons that dropped to their own users and waits
+    for them, and the README says a graceful stop is one of the things the
+    set above was checked against.
+    """
+    wrapped = hardened_relay.get_wrapped_container()
+
+    started = time.monotonic()
+    wrapped.stop(timeout=30)
+    elapsed = time.monotonic() - started
+
+    wrapped.reload()
+    assert wrapped.attrs['State']['ExitCode'] == 0
+    assert elapsed < 10, f"stopping took {elapsed:.1f}s, the SIGTERM trap did not run"

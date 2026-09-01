@@ -42,6 +42,7 @@ protection. So be careful to not expose it publicly, see
     </ul>
   </li>
   <li><a href="#volumes">Volumes</a></li>
+  <li><a href="#upgrading">Upgrading</a></li>
   <li>
     <a href="#logging">Logging</a>
     <ul>
@@ -82,15 +83,17 @@ docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
 
 ### Using docker-compose
 ```
-app:
-  # use hostname "smtp" as SMTP server
+services:
+  app:
+    image: your-app
+    # sends its mail to the host "smtp", which is the service below
 
-smtp:
-  image: mwader/postfix-relay
-  restart: always
-  environment:
-    - POSTFIX_myhostname=smtp.domain.tld
-    - OPENDKIM_DOMAINS=smtp.domain.tld
+  smtp:
+    image: mwader/postfix-relay
+    restart: always
+    environment:
+      - POSTFIX_myhostname=smtp.domain.tld
+      - OPENDKIM_DOMAINS=smtp.domain.tld
 ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
@@ -202,19 +205,20 @@ To hand mail over to a provider instead of delivering it yourself, point
 `POSTFIX_relayhost` at it and give postfix the credential in a lookup table:
 
 ```
-smtp:
-  image: mwader/postfix-relay
-  environment:
-    - POSTFIX_myhostname=smtp.domain.tld
-    - POSTFIX_relayhost=[smtp.provider.tld]:587
-    - POSTFIX_smtp_sasl_auth_enable=yes
-    - POSTFIX_smtp_sasl_password_maps=hash:/etc/postfix/sasl_passwd
-    - POSTFIX_smtp_sasl_security_options=noanonymous
-    # Refuse to send at all if the connection cannot be encrypted
-    - POSTFIX_smtp_tls_security_level=encrypt
-    - POSTMAP_sasl_passwd_FILE=/run/secrets/sasl_passwd
-  secrets:
-    - sasl_passwd
+services:
+  smtp:
+    image: mwader/postfix-relay
+    environment:
+      - POSTFIX_myhostname=smtp.domain.tld
+      - POSTFIX_relayhost=[smtp.provider.tld]:587
+      - POSTFIX_smtp_sasl_auth_enable=yes
+      - POSTFIX_smtp_sasl_password_maps=hash:/etc/postfix/sasl_passwd
+      - POSTFIX_smtp_sasl_security_options=noanonymous
+      # Refuse to send at all if the connection cannot be encrypted
+      - POSTFIX_smtp_tls_security_level=encrypt
+      - POSTMAP_sasl_passwd_FILE=/run/secrets/sasl_passwd
+    secrets:
+      - sasl_passwd
 
 secrets:
   sasl_passwd:
@@ -312,7 +316,7 @@ This parameter is handled by Debian base image.
 
 ```
 environment:
-  ...
+  # ...
   - TZ=Europe/Prague
 ```
 
@@ -375,6 +379,13 @@ offers it (`POSTFIX_smtp_tls_security_level=may`). Set it to `encrypt` when
 relaying through a provider, where an unencrypted connection is a
 misconfiguration rather than the only option.
 
+`encrypt` only means the connection was encrypted, not that it was the right
+server: it accepts any certificate. `verify` and `secure` also check the
+certificate against the trust store the image ships, which is what turns
+"nobody read this on the way" into "this went to the provider I meant".
+`POSTFIX_smtp_tls_CAfile` names that store and is set by default, so those two
+levels work without anything else being mounted.
+
 ### Client authentication
 The container includes [Postfix SASL](https://www.postfix.org/SASL_README.html) authentication options that are disabled by default.
 
@@ -413,8 +424,12 @@ volumes:
   - /your_local_path/pam_smtp:/etc/pam.d/smtp
 ```
 
-The generated `smtpd.conf` offers `CRAM-MD5 DIGEST-MD5 LOGIN PLAIN`; a mounted
-one saying `mech_list: PLAIN` is what the relay then advertises.
+The generated `smtpd.conf` offers `LOGIN PLAIN`, the two mechanisms that hand
+`saslauthd` a password to check: `CRAM-MD5` and `DIGEST-MD5` prove knowledge of
+a password without sending it, which needs a secret this check never has, so
+offering them only makes clients that pick the strongest mechanism fail. A
+mounted `smtpd.conf` saying `mech_list: PLAIN` is what the relay then
+advertises instead.
 
 `SASL_Passwds` still has to be set to something non-empty, whatever those files
 contain. It is what switches the whole SASL block on, and `saslauthd` is started
@@ -487,7 +502,7 @@ keys to persist indefinitely, make sure to mount a volume for
 `/etc/opendkim/keys`, otherwise they will be destroyed when the container is
 removed.
 
-DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt` you should see something like this:
+DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt'` you should see something like this:
 ```bash
 $ docker exec 7996454b5fca sh -c 'cat /etc/opendkim/keys/*/*.txt'
 
@@ -537,13 +552,64 @@ mail.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
+<!-- UPGRADING -->
+## Upgrading
+Pulling a newer image replaces the container's whole filesystem, and that is
+what makes an upgrade here different from upgrading postfix on a host. The
+postfix configuration is not carried across: it comes from the new image, and
+`run` applies your `POSTFIX_` variables to it on every start. Your settings are
+re-derived from the environment each time rather than inherited, so an upgrade
+cannot leave behind a setting that no longer matches what you asked for.
+
+That is also why postfix's [backwards-compatibility safety
+net](https://www.postfix.org/COMPATIBILITY_README.html) rarely comes up here.
+On a host it exists because the old `main.cf` survives the package upgrade, so
+postfix keeps the old defaults and, rather than changing behaviour silently,
+"logs a message whenever a backwards-compatible default setting may be required
+for continuity of service" until the administrator makes the settings it names
+permanent and raises `compatibility_level`. In this image that level is
+whatever the new base ships, with no older configuration for it to protect.
+Mounting your own postfix configuration file is the exception: that file is
+state you own, it does survive, and the safety net applies to it exactly as it
+would anywhere else, so read the log after the first start on a new image.
+
+What does survive an upgrade is the two [volumes](#volumes). The DKIM keys are
+read by whichever opendkim starts next, so the records you published stay
+valid. Mail still in the queue is handed to the new postfix; if you would
+rather not upgrade with mail in flight, deliver what is queued and check the
+queue is empty first (see [the queue
+section](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)).
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
 <!-- LOGGING -->
 ## Logging
-By default container only logs to stdout. If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
+By default container only logs to stdout.
+
+`RSYSLOG_TIMESTAMP` decides what those lines look like. It defaults to `no`,
+which leaves them as the bare message:
+
+```
+postfix/smtpd[195]: connect from unknown[172.18.0.1]
+```
+
+Docker records a timestamp for every line it collects, so `docker logs -t`
+still shows one and nothing is lost. Set it to `yes` when something reading the
+log parses the message itself and expects a timestamp and a hostname in it:
+
+```
+2026-08-04T16:37:42.344044+00:00 f5ffdf0ff6bf postfix/smtpd[195]: connect from unknown[172.18.0.1]
+```
+
+It applies to the container log and to `/var/log/mail.log`, but not to a
+`.conf` file of your own in `/etc/rsyslog.d`, which keeps the rsyslog default
+format, nor to remote forwarding, which has `RSYSLOG_REMOTE_TEMPLATE` below.
+
+If you also wish to log `mail.*` messages to file on persistent volume, you can do something like:
 
 ```
 environment:
-  ...
+  # ...
   - RSYSLOG_LOG_TO_FILE=yes
   - RSYSLOG_TIMESTAMP=yes
 volumes:
@@ -556,7 +622,7 @@ you can change it to [another template](https://www.rsyslog.com/doc/v8-stable/co
 
 ```
 environment:
-  ...
+  # ...
   - RSYSLOG_REMOTE_HOST=my.remote-syslog-server.com
   - RSYSLOG_REMOTE_PORT=514
   - RSYSLOG_REMOTE_TEMPLATE=RSYSLOG_ForwardFormat
@@ -740,6 +806,8 @@ against a native run.
 | `test_healthcheck.py` | The health check, against relays with a daemon taken away |
 | `test_lifecycle.py` | Starting, restarting, stopping, and the mail that is in the queue meanwhile |
 | `test_capabilities.py` | Relaying with everything docker grants by default taken away but the documented set |
+| `test_secrets.py` | Configuration read from a file instead of the environment, and what the health check still expects |
+| `test_qshape.py` | The queue tool the troubleshooting section has users run |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and

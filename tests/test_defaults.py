@@ -10,8 +10,54 @@ These tests share the default relay, so they cost no extra container.
 
 import re
 
-from tests.helpers import (esmtp_features, listening_ports, postconf,
+import pytest
+
+from testcontainers.core.container import DockerContainer
+from testcontainers.core.waiting_utils import wait_for_logs
+
+from tests.helpers import (esmtp_features, image_run, listening_ports, postconf,
                            process_running, send, wait_for_log)
+
+# A next hop whose certificate is signed by a CA of our own, so that trusting
+# it is a question about the trust store rather than about the certificate.
+TRUSTED_HOP = 'trusted-next-hop'
+CERTIFICATE_MATERIAL = f"""
+cd /tmp &&
+openssl req -x509 -newkey rsa:2048 -noenc -days 1 -subj /CN=test-ca \
+  -keyout ca-key.pem -out ca.pem 2> /dev/null &&
+openssl req -newkey rsa:2048 -noenc -subj /CN={TRUSTED_HOP} \
+  -addext subjectAltName=DNS:{TRUSTED_HOP} -keyout key.pem -out csr.pem 2> /dev/null &&
+openssl x509 -req -in csr.pem -CA ca.pem -CAkey ca-key.pem -days 1 \
+  -copy_extensions copy -out cert.pem 2> /dev/null &&
+cat ca.pem && echo === && cat cert.pem && echo === && cat key.pem
+"""
+
+
+@pytest.fixture
+def trusted_next_hop(postfix_image, mailpit_image, shared_network):
+    """A server offering STARTTLS with a certificate a given CA signed.
+
+    Returns that CA, for the relay to be given as its whole trust store: a
+    relay that verifies it has looked in the store, and one that does not has
+    nothing to look in.
+    """
+    ca, certificate, key = image_run(
+        postfix_image, ["sh", "-c", CERTIFICATE_MATERIAL]).split('===\n')
+
+    container = DockerContainer(mailpit_image) \
+        .with_network(shared_network) \
+        .with_network_aliases(TRUSTED_HOP) \
+        .with_env('MP_SMTP_TLS_CERT', '/cert.pem') \
+        .with_env('MP_SMTP_TLS_KEY', '/key.pem') \
+        .with_copy_into_container(certificate.encode(), '/cert.pem') \
+        .with_copy_into_container(key.encode(), '/key.pem')
+
+    container.start()
+    try:
+        wait_for_logs(container, ".*accessible via.*")
+        yield ca
+    finally:
+        container.stop()
 
 
 def test_the_banner_announces_myhostname(postfix):
@@ -158,3 +204,26 @@ def test_mail_for_any_domain_is_accepted(postfix, mailpit):
 
     assert sorted(to['Address'] for to in message['To']) == \
         ['someone@first.example', 'someone@second.example']
+
+
+def test_a_next_hop_the_trust_store_vouches_for_is_verified(trusted_next_hop,
+                                                            postfix_factory):
+    """"verify" is the level that authenticates the server being handed the
+    mail, and it needs something to check the certificate against.
+
+    The relay is given one CA as its whole trust store, and the next hop's
+    certificate is signed by it, so the delivery only goes through if postfix
+    read the file the image points it at. Without a CA file it defers every
+    message with "Server certificate not verified".
+    """
+    relay = postfix_factory(env={
+        'POSTFIX_relayhost': f"[{TRUSTED_HOP}]:1025",
+        'POSTFIX_smtp_tls_security_level': 'verify',
+        'POSTFIX_smtp_tls_loglevel': '1',
+    }, files={'/etc/ssl/certs/ca-certificates.crt': trusted_next_hop})
+
+    send(relay, subject='verified next hop')
+
+    log = wait_for_log(relay, 'status=sent')
+
+    assert f"Verified TLS connection established to {TRUSTED_HOP}" in log
