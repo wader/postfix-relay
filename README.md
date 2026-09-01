@@ -497,7 +497,14 @@ specify a whitespace-separated list of domains in the environment variable
 "`<selector>`" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
 
 At container start, RSA key pairs will be generated for each domain unless the
-file `/etc/opendkim/keys/<domain>/<selector>.private` exists. If you want the
+file `/etc/opendkim/keys/<domain>/<selector>.private` exists.
+
+Signing that was asked for and cannot happen stops the container rather than
+being skipped, so a relay never quietly sends unsigned mail on your behalf.
+It exits with a message on stderr if a key has to be generated and cannot be
+written — a read-only `/etc/opendkim/keys` is the usual reason — or if a key
+that is already there cannot be read as a private key, which is what an empty
+or truncated file looks like. If you want the
 keys to persist indefinitely, make sure to mount a volume for
 `/etc/opendkim/keys`, otherwise they will be destroyed when the container is
 removed.

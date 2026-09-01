@@ -10,12 +10,16 @@ LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com
 # needs more than perl-base, so that dependency could correctly be narrowed and
 # take qshape down with it on a routine base bump. Naming it here costs nothing
 # now and keeps that from happening.
+# openssl is spelled out for the same reason: "run" uses it to refuse a DKIM
+# key it cannot read, and it is in the image today only because ca-certificates
+# depends on it.
 RUN \
   apt-get update && \
   apt-get -y --no-install-recommends install \
     procps \
     postfix \
     perl \
+    openssl \
     libsasl2-modules \
     libpam-pwdfile \
     sasl2-bin \
