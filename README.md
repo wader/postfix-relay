@@ -42,6 +42,7 @@ protection. So be careful to not expose it publicly, see
     </ul>
   </li>
   <li><a href="#volumes">Volumes</a></li>
+  <li><a href="#upgrading">Upgrading</a></li>
   <li>
     <a href="#logging">Logging</a>
     <ul>
@@ -534,6 +535,36 @@ Do not point two running containers at the same queue directory. Postfix's
 singleton lock lives in `/var/lib/postfix` rather than in the queue, so nothing
 prevents two masters from working on one queue and duplicating or corrupting
 mail.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- UPGRADING -->
+## Upgrading
+Pulling a newer image replaces the container's whole filesystem, and that is
+what makes an upgrade here different from upgrading postfix on a host. The
+postfix configuration is not carried across: it comes from the new image, and
+`run` applies your `POSTFIX_` variables to it on every start. Your settings are
+re-derived from the environment each time rather than inherited, so an upgrade
+cannot leave behind a setting that no longer matches what you asked for.
+
+That is also why postfix's [backwards-compatibility safety
+net](https://www.postfix.org/COMPATIBILITY_README.html) rarely comes up here.
+On a host it exists because the old `main.cf` survives the package upgrade, so
+postfix keeps the old defaults and, rather than changing behaviour silently,
+"logs a message whenever a backwards-compatible default setting may be required
+for continuity of service" until the administrator makes the settings it names
+permanent and raises `compatibility_level`. In this image that level is
+whatever the new base ships, with no older configuration for it to protect.
+Mounting your own postfix configuration file is the exception: that file is
+state you own, it does survive, and the safety net applies to it exactly as it
+would anywhere else, so read the log after the first start on a new image.
+
+What does survive an upgrade is the two [volumes](#volumes). The DKIM keys are
+read by whichever opendkim starts next, so the records you published stay
+valid. Mail still in the queue is handed to the new postfix; if you would
+rather not upgrade with mail in flight, deliver what is queued and check the
+queue is empty first (see [the queue
+section](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)).
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
