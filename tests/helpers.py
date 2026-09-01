@@ -191,6 +191,11 @@ def container_log(container):
     return container.get_logs()[0].decode()
 
 
+def container_stderr(container):
+    """What the container refused to do: container_log only takes stdout."""
+    return container.get_logs()[1].decode()
+
+
 def wait_for_log(container, text, timeout=DEFAULT_TIMEOUT):
     """Wait for a line in the container log and return the whole log."""
     return poll_until(lambda: text in container_log(container) and container_log(container),

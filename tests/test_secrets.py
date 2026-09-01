@@ -10,18 +10,13 @@ import pytest
 
 from testcontainers.community.mailpit import MailpitUser
 
-from tests.helpers import (container_exec, container_log,
+from tests.helpers import (container_exec, container_log, container_stderr,
                            healthcheck_after_stopping, send)
 
 UPSTREAM = '[secrets-upstream]:1025'
 USER, PASSWORD = 'relay', 's3cret'
 SECRET = '/run/secrets/sasl_passwd'
 SASL_PASSWD = f"{UPSTREAM} {USER}:{PASSWORD}\n"
-
-
-def container_stderr(container):
-    """What the container refused to do: container_log only takes stdout."""
-    return container.get_logs()[1].decode()
 
 
 def healthcheck(container):

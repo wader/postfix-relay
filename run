@@ -24,6 +24,51 @@ awaitProcess()
     return 1
 }
 
+# The first smtpd port master.cf serves on every interface, which is the one
+# the image exposes. A service bound to a single address is left alone: it may
+# be there for something that does not answer this container.
+smtpdPort()
+{
+    local service port
+
+    service=$(postconf -M | awk '$2 == "inet" && $NF == "smtpd" && $1 !~ /:/ { print $1 ; exit }')
+    [ -n "$service" ] || return 1
+
+    port=$(getent services "$service" | awk '{ sub("/.*", "", $2) ; print $2 }')
+    echo "${port:-$service}"
+}
+
+# Whether an smtpd survives long enough to greet a client.
+awaitGreeting()
+{
+    local port="$1" try greeting
+
+    for try in 1 2 3 4 5 ; do
+      # The connection is opened inside a subshell, and the redirection that
+      # silences a refused one is on the substitution rather than on "exec":
+      # "exec ... 2> /dev/null" has no command to apply to, so it would send
+      # this script's own stderr to /dev/null for the rest of the container's
+      # life, taking every message below with it.
+      greeting=$(
+        exec 3<>"/dev/tcp/127.0.0.1/$port" || exit
+        # Short: master accepts at once when an smtpd can run, and holds the
+        # connection open with nothing behind it when one cannot -- it keeps
+        # the socket while it throttles the service it could not start. Five
+        # tries of this is the whole cost of refusing a broken relay.
+        read -t 2 -r line <&3
+        # QUIT rather than dropping the connection, so the one line this
+        # leaves in the log is a disconnect and not a lost connection.
+        printf 'QUIT\r\n' >&3
+        echo "$line"
+      ) 2> /dev/null
+
+      case "$greeting" in 220*) return 0 ;; esac
+      sleep 0.2
+    done
+
+    return 1
+}
+
 startService()
 {
     local name="$1" process="$2"
@@ -351,6 +396,27 @@ fi
 rsyslogd -n &
 rsyslogPid=$!
 supervised="$supervised rsyslogd"
+
+# A running master is not the same as a postfix that can serve. Master binds
+# the port and forks an smtpd per connection, so a setting smtpd rejects when
+# it reads it leaves a relay that listens, accepts, and then kills every
+# session. Nothing else notices: "postconf -e" takes the value without a word,
+# "postfix check" passes, the socket is in /proc and master is running, so the
+# health check reports the container healthy while it relays nothing at all
+# (issue #206).
+#
+# One greeting is what separates the two. It is done here rather than in the
+# health check because it costs a connect in the log: once per container here,
+# every interval there. After rsyslogd so that postfix's own reason -- the
+# "fatal:" line naming the setting -- is in the container log above this.
+smtpdPort=$(smtpdPort)
+if [ -n "$smtpdPort" ] && ! awaitGreeting "$smtpdPort" ; then
+  echo "No smtpd survived a connection on $smtpdPort, which a setting postfix" \
+       "rejects when smtpd reads it will do; refusing to relay. The line above" \
+       "starting \"fatal:\" names it." >&2
+  stopDaemons
+  exit 1
+fi
 
 # rsyslogd is the only one of them that is a child of this script, so the bare
 # "wait" this replaces was watching one daemon out of five and the container
