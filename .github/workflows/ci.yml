@@ -54,8 +54,12 @@ jobs:
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       -
+        # Dependabot pushes its branch before opening the pull request, and a
+        # run it triggers can only read Dependabot secrets, never the Actions
+        # secrets below. Logging in would fail, so skip the registry for it and
+        # let the build alone prove the bump.
         name: Login to DockerHub
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -81,7 +85,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
