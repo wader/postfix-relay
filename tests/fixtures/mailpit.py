@@ -101,15 +101,33 @@ class Mailpit:
             time.sleep(0.5)
 
 
+def _pull_if_absent():
+    """Fetch the image, unless this machine already has it.
+
+    IMAGE names an exact version, so an image that is here is the image a
+    pull would bring: asking for it again is a registry round trip that buys
+    nothing and spends one of the hundred anonymous pulls Docker Hub allows
+    per six hours. Past that it answers 429, every mailpit fixture fails to
+    set up, and a hundred tests error out looking like a regression.
+
+    A runner starts without it and pulls exactly as before.
+    """
+    client = docker.from_env()
+
+    try:
+        client.images.get(IMAGE)
+    except docker.errors.ImageNotFound:
+        client.images.pull(IMAGE)
+
+
 @pytest.fixture(scope="session")
 def mailpit_image(tmp_path_factory):
-    """The mailpit image, pulled once for the whole run.
+    """The mailpit image, fetched once for the whole run.
 
     Starting a container pulls the image it needs, so without this every
     worker would pull this one at the same moment as the others.
     """
-    once_across_workers(tmp_path_factory, "mailpit-image",
-                        lambda: docker.from_env().images.pull(IMAGE))
+    once_across_workers(tmp_path_factory, "mailpit-image", _pull_if_absent)
 
     return IMAGE
 
