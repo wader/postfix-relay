@@ -8,9 +8,9 @@ import time
 
 import pytest
 
-from tests.helpers import (container_exec, container_log, exit_code_within, poll_until,
-                           process_running, restart, send, wait_for_file, wait_for_log,
-                           wait_for_smtp)
+from tests.helpers import (container_exec, container_log, container_stderr,
+                           exit_code_within, poll_until, process_running, restart,
+                           send, wait_for_file, wait_for_log, wait_for_smtp)
 
 
 def health(container):
@@ -231,6 +231,31 @@ def test_the_container_stops_when_a_daemon_it_started_exits(daemon, env, postfix
     # second reading that confirms it. It costs nothing when the container
     # does stop, which is the outcome being asserted.
     assert exit_code_within(relay, seconds=15) == 1
+
+
+def test_a_setting_postfix_cannot_serve_with_stops_the_container(postfix_factory):
+    """A relay that listens and kills every session is worse than one that
+    is down: nothing about it looks wrong from outside.
+
+    An empty error_notice_recipient is the reachable case -- the README
+    documents an empty value as the way to clear a default, postconf takes
+    it without a word and "postfix check" passes, but smtpd reads it at the
+    start of every session and dies on it. The master keeps the port open
+    throughout, so the health check has a running master and a listening
+    socket to look at and reports healthy (issue #206).
+    """
+    relay = postfix_factory(env={'POSTFIX_error_notice_recipient': ''},
+                            wait_ready=False)
+
+    # Longer than the daemon cases above: master holds the connection open
+    # with nothing behind it while it throttles the smtpd it could not start,
+    # so each of the five attempts waits out its own read timeout.
+    assert exit_code_within(relay, seconds=25) == 1
+
+    log = container_log(relay) + container_stderr(relay)
+    # Postfix's own reason, which names the setting, and then this image's.
+    assert 'bad string length' in log
+    assert 'No smtpd survived a connection' in log
 
 
 def test_the_chroot_still_works_when_the_queue_is_mounted_from_the_host(

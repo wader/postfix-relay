@@ -578,6 +578,14 @@ mail without the signing or rewriting that was configured, and a daemon that
 later gives up on its own exits the container non-zero, so `restart:
 on-failure` brings it back.
 
+Postfix is held to the same rule one step further in: start-up asks it for a
+greeting before handing over, because a running `master` is not yet a relay
+that works. Master binds the port and starts an `smtpd` per connection, so a
+setting `smtpd` rejects when it reads it leaves a container that listens,
+accepts, and kills every session — with a running master and an open socket
+for the health check to find. The container stops instead, and the postfix
+`fatal:` line naming the setting is in the log above.
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- TROUBLESHOOTING -->
