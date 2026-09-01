@@ -4,7 +4,10 @@ from email.message import EmailMessage
 from email.utils import make_msgid
 from email.headerregistry import Address
 
+import pytest
 
+
+@pytest.mark.smoke
 def test_sendmail(mailpit, smtp):
     # Send email to postfix
     msg = EmailMessage()

@@ -7,8 +7,13 @@
 #   does not wait for CI and merges straight away
 #
 # Required checks are matched by job name, not by workflow name. The names
-# that exist are "Build Image", "Pytest", "Event File" and "Test Results";
-# "ci" and "test" are workflows and never report a check of their own.
+# that exist are "Build Image", "Pytest", "Pytest (arm64)",
+# "Pytest (arm/v7, emulated)", "Event File" and "Test Results"; "ci" and
+# "test" are workflows and never report a check of their own.
+#
+# "Pytest (arm/v7, emulated)" does not run on a pull request unless it is
+# labelled "test-emulated", which is nearly all of them, so it is not a
+# candidate for the required list whatever github makes of a skipped check.
 
 name: Dependabot auto-merge
 

@@ -14,13 +14,54 @@ ROOT_PATH = os.path.dirname(__file__) + '/../../'
 
 IMAGE_TAG = "postfix-relay:test"
 
+# An image built outside the suite, for the runs that cannot build their own:
+# DockerImage builds through the docker daemon, which cannot cross-build, so a
+# foreign architecture has to be built with buildx and loaded first. Unset,
+# which is every run on the machine it is meant for, the suite builds the image
+# as it always has.
+#
+# Only accepted for an architecture this machine cannot build, which is the
+# whole of the case for having it. Building from the Dockerfile is what makes
+# the suite test the tree it is run in rather than whatever was left in the
+# image store, and that is not worth giving up anywhere it can still be done.
+PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
+
+# What that image has to be, as docker reports it: "arm" for the arm/v7 image,
+# "arm64", "amd64". Without this a job that meant to test another architecture
+# and got the runner's own would pass every test it ran and say nothing, which
+# is the one way an emulated run can be worse than no run at all.
+EXPECTED_ARCHITECTURE = os.environ.get('POSTFIX_RELAY_ARCH')
+
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
 
 
 @pytest.fixture(scope="session")
 def postfix_image(tmp_path_factory):
-    """The image under test, built once for the whole run."""
+    """The image under test, built once for the whole run.
+
+    Every test reaches the image through here, so pointing this at a prebuilt
+    one is enough to run the suite against an image the suite did not build.
+    """
+    if PREBUILT_IMAGE:
+        client = docker.from_env()
+        image = client.images.get(PREBUILT_IMAGE)
+        architecture = image.attrs['Architecture']
+
+        if architecture == client.version()['Arch']:
+            raise AssertionError(
+                f"POSTFIX_RELAY_IMAGE names a {architecture} image, which this "
+                "machine can build: the suite builds from the Dockerfile so "
+                "that what it tests is what is in the tree. It takes a "
+                "prebuilt image only where the docker builder cannot make one.")
+
+        if EXPECTED_ARCHITECTURE and architecture != EXPECTED_ARCHITECTURE:
+            raise AssertionError(
+                f"{PREBUILT_IMAGE} is {architecture}, not {EXPECTED_ARCHITECTURE}: "
+                "the tests would have passed against the wrong architecture")
+
+        return PREBUILT_IMAGE
+
     once_across_workers(
         tmp_path_factory, "postfix-image",
         lambda: DockerImage(path=ROOT_PATH, tag=IMAGE_TAG).build())
