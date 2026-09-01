@@ -9,7 +9,8 @@ import time
 
 import pytest
 
-from tests.helpers import container_exec, exit_code_within, send
+from tests.helpers import (container_exec, container_log, container_stderr,
+                           exit_code_within, send)
 
 # The set documented in the README, and the reason for each of them:
 # CHOWN and FOWNER for giving the queue to postfix and the DKIM keys to
@@ -62,9 +63,16 @@ def test_dropping_everything_stops_the_container(postfix_factory):
 def test_the_hardened_relay_stops_gracefully(hardened_relay):
     """Stopping is the operation most likely to miss a capability.
 
-    "stopDaemons" signals daemons that dropped to their own users and waits
-    for them, and the README says a graceful stop is one of the things the
-    set above was checked against.
+    "stopDaemons" stops postfix through its own script and signals the rest,
+    and the README says a graceful stop is one of the things the set above was
+    checked against. Not all of it can be signalled here: opendkim runs as its
+    own user and CAP_KILL is one of the capabilities this set drops, so it is
+    left for docker to take down with the container -- which is what it was
+    already left doing, because the init script could not find it either.
+
+    What the stop must not do is say anything untrue about that, or leave an
+    error behind on the way out. It used to do both: opendkim's script
+    reported "none killed" and postsrsd's reported a success it had not had.
     """
     wrapped = hardened_relay.get_wrapped_container()
 
@@ -75,3 +83,9 @@ def test_the_hardened_relay_stops_gracefully(hardened_relay):
     wrapped.reload()
     assert wrapped.attrs['State']['ExitCode'] == 0
     assert elapsed < 10, f"stopping took {elapsed:.1f}s, the SIGTERM trap did not run"
+
+    log = container_log(hardened_relay) + container_stderr(hardened_relay)
+
+    assert 'none killed' not in log
+    assert 'Stopping Postfix Sender Rewriting Scheme daemon' not in log
+    assert 'not permitted' not in log
