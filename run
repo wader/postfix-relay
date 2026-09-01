@@ -189,6 +189,25 @@ dkimConfig()
         fi
       fi
 
+      # A key that is there but cannot be read is the same failure arriving by
+      # another door, and the guard above never sees it: a <selector>.private
+      # that is empty, truncated or restored from a backup that was taken
+      # mid-write skips the generation entirely because the file exists. Then
+      # the tables below name it, opendkim starts having loaded nothing, and
+      # every message goes out unsigned while the container reports healthy --
+      # the signing that was asked for silently not happening, which is the
+      # thing the refusal above exists to prevent.
+      #
+      # "openssl pkey" rather than "openssl rsa": opendkim also takes ed25519
+      # keys, and the generic form parses both. It only has to answer whether
+      # this is a private key at all, which is what opendkim will fail on.
+      if ! openssl pkey -in "$privateFile" -noout > /dev/null 2>&1 ; then
+        echo "The DKIM private key for selector '$selector' in domain" \
+             "'$domain' cannot be read as a private key: $privateFile." \
+             "Refusing to relay without the signing that was asked for." >&2
+        exit 1
+      fi
+
       # Ensure strict permissions required by opendkim
       chown opendkim:opendkim "$domainDir" "$privateFile"
       chmod a=,u=rwx "$domainDir"
