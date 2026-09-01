@@ -82,15 +82,17 @@ docker run -e POSTFIX_myhostname=smtp.domain.tld mwader/postfix-relay
 
 ### Using docker-compose
 ```
-app:
-  # use hostname "smtp" as SMTP server
+services:
+  app:
+    image: your-app
+    # sends its mail to the host "smtp", which is the service below
 
-smtp:
-  image: mwader/postfix-relay
-  restart: always
-  environment:
-    - POSTFIX_myhostname=smtp.domain.tld
-    - OPENDKIM_DOMAINS=smtp.domain.tld
+  smtp:
+    image: mwader/postfix-relay
+    restart: always
+    environment:
+      - POSTFIX_myhostname=smtp.domain.tld
+      - OPENDKIM_DOMAINS=smtp.domain.tld
 ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
@@ -202,19 +204,20 @@ To hand mail over to a provider instead of delivering it yourself, point
 `POSTFIX_relayhost` at it and give postfix the credential in a lookup table:
 
 ```
-smtp:
-  image: mwader/postfix-relay
-  environment:
-    - POSTFIX_myhostname=smtp.domain.tld
-    - POSTFIX_relayhost=[smtp.provider.tld]:587
-    - POSTFIX_smtp_sasl_auth_enable=yes
-    - POSTFIX_smtp_sasl_password_maps=hash:/etc/postfix/sasl_passwd
-    - POSTFIX_smtp_sasl_security_options=noanonymous
-    # Refuse to send at all if the connection cannot be encrypted
-    - POSTFIX_smtp_tls_security_level=encrypt
-    - POSTMAP_sasl_passwd_FILE=/run/secrets/sasl_passwd
-  secrets:
-    - sasl_passwd
+services:
+  smtp:
+    image: mwader/postfix-relay
+    environment:
+      - POSTFIX_myhostname=smtp.domain.tld
+      - POSTFIX_relayhost=[smtp.provider.tld]:587
+      - POSTFIX_smtp_sasl_auth_enable=yes
+      - POSTFIX_smtp_sasl_password_maps=hash:/etc/postfix/sasl_passwd
+      - POSTFIX_smtp_sasl_security_options=noanonymous
+      # Refuse to send at all if the connection cannot be encrypted
+      - POSTFIX_smtp_tls_security_level=encrypt
+      - POSTMAP_sasl_passwd_FILE=/run/secrets/sasl_passwd
+    secrets:
+      - sasl_passwd
 
 secrets:
   sasl_passwd:
@@ -312,7 +315,7 @@ This parameter is handled by Debian base image.
 
 ```
 environment:
-  ...
+  # ...
   - TZ=Europe/Prague
 ```
 
@@ -487,7 +490,7 @@ keys to persist indefinitely, make sure to mount a volume for
 `/etc/opendkim/keys`, otherwise they will be destroyed when the container is
 removed.
 
-DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt` you should see something like this:
+DNS records to configure can be found in the container log or by running `docker exec <container> sh -c 'cat /etc/opendkim/keys/*/*.txt'` you should see something like this:
 ```bash
 $ docker exec 7996454b5fca sh -c 'cat /etc/opendkim/keys/*/*.txt'
 
@@ -543,7 +546,7 @@ By default container only logs to stdout. If you also wish to log `mail.*` messa
 
 ```
 environment:
-  ...
+  # ...
   - RSYSLOG_LOG_TO_FILE=yes
   - RSYSLOG_TIMESTAMP=yes
 volumes:
@@ -556,7 +559,7 @@ you can change it to [another template](https://www.rsyslog.com/doc/v8-stable/co
 
 ```
 environment:
-  ...
+  # ...
   - RSYSLOG_REMOTE_HOST=my.remote-syslog-server.com
   - RSYSLOG_REMOTE_PORT=514
   - RSYSLOG_REMOTE_TEMPLATE=RSYSLOG_ForwardFormat
@@ -740,6 +743,8 @@ against a native run.
 | `test_healthcheck.py` | The health check, against relays with a daemon taken away |
 | `test_lifecycle.py` | Starting, restarting, stopping, and the mail that is in the queue meanwhile |
 | `test_capabilities.py` | Relaying with everything docker grants by default taken away but the documented set |
+| `test_secrets.py` | Configuration read from a file instead of the environment, and what the health check still expects |
+| `test_qshape.py` | The queue tool the troubleshooting section has users run |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and
