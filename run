@@ -45,11 +45,14 @@ smtpdPort()
 # narrowed to addresses that do not include it, in which case the first one it
 # names does: a relay is free to serve only the address its clients reach it
 # on, and greeting loopback there would refuse to start a relay that works.
+# Read with "-x" so that main.cf macros are expanded: "inet_interfaces =
+# $myhostname" is an ordinary way to write this, and "-h" alone hands back the
+# literal "$myhostname" to dial.
 smtpdAddress()
 {
     local interfaces entry first
 
-    interfaces=$(postconf -h inet_interfaces)
+    interfaces=$(postconf -hx inet_interfaces)
     for entry in ${interfaces//,/ } ; do
       case "$entry" in
         all|loopback-only|127.0.0.1|localhost) echo 127.0.0.1 ; return ;;
