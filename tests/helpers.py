@@ -29,8 +29,20 @@ def wait_for_smtp(container, port=25, timeout=DEFAULT_TIMEOUT):
 
     A log line only tells that the start-up script got that far, postfix can
     still be a moment away from accepting connections.
+
+    A container that has exited is not waited for: "run" stops the container
+    on a configuration it refuses, so sitting out the timeout on one only
+    delays a failure that is already decided, and reports it as a silent
+    relay rather than as the refusal it is.
     """
+    wrapped = container.get_wrapped_container()
+
     def banner():
+        wrapped.reload()
+        if wrapped.status == 'exited':
+            raise AssertionError(
+                f"the container exited with {wrapped.attrs['State']['ExitCode']} "
+                f"instead of answering on port {port}")
         try:
             smtp = smtplib.SMTP(container.get_container_host_ip(),
                                 container.get_exposed_port(port),
@@ -219,12 +231,19 @@ def _dotted_quad(hex_address):
                     for index in range(6, -2, -2))
 
 
-def exit_code_within(container, seconds=15):
+def exit_code_within(container, seconds=5):
     """The code the container exited with, or None if it is still running.
 
     docker's wait endpoint has no notion of "not yet": asking it to wait
     less than the container takes raises a read timeout, which is the
     answer rather than an error here.
+
+    Five seconds rather than fifteen: "run" waits on the daemon it
+    started in the foreground, so it hears about the death immediately and
+    the container is gone 0.2s later, measured. The wait is what a caller
+    pays when the container does *not* stop, which is the case the callers
+    below are documenting, so keeping it near the time the answer actually
+    takes is most of what those tests cost.
     """
     try:
         return container.get_wrapped_container().wait(timeout=seconds)['StatusCode']
