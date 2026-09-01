@@ -840,6 +840,18 @@ lost.
 When a test fails, the log of the containers it used is part of the pytest
 output.
 
+`run` and `healthcheck` are shell rather than python, so the suite does not
+read them. Continuous integration runs shellcheck over both, and a pull
+request that introduces a shellcheck *error* in either is rejected:
+
+```bash
+shellcheck -S error run healthcheck
+```
+
+That threshold is the whole gate. Warnings and notes below it are left
+alone, some of them deliberately, so raising it would mean changing code
+that is already correct.
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- LICENSE -->

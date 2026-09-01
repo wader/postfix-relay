@@ -1,0 +1,67 @@
+name: lint
+
+on:
+  push:
+    branches:
+      - 'master'
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+# What this gate is, and what it deliberately is not.
+#
+# It runs shellcheck at "-S error", which is the threshold the two scripts pass
+# today and the only one that does: "-S warning" fails on the SC2034 in
+# awaitGreeting, and the default threshold fails on that plus eight notes,
+# two of which are deliberate and must not be "fixed" -- that SC2034 is a retry
+# counter the loop body has no reason to read, and the SC2086 in healthcheck is
+# word splitting the check needs, because listening() builds
+# proc="/proc/net/tcp /proc/net/tcp6" and awk has to receive both paths.
+# CLAUDE.md's Lint section is the full list.
+#
+# So this exists to keep an actual error -- an unclosed quote, a bad
+# substitution, a construct that does not do what it reads as -- out of a
+# script that runs as pid 1 in everyone's relay. It is not a step towards a
+# stricter threshold: raising it would mean changing code that is already
+# correct.
+#
+# shellcheck is pinned and checksummed rather than taken from the runner image,
+# and nothing bumps it. An unpinned linter fails somebody's unrelated pull
+# request on the day it ships a new check; test.yml pins the QEMU binfmt image
+# for the same reason. Moving to a newer shellcheck is a deliberate edit, the
+# way a base-image suite change is.
+
+jobs:
+  shellcheck:
+    name: "ShellCheck"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SHELLCHECK_VERSION: v0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install shellcheck
+        # Into RUNNER_TEMP rather than the checkout, so the tree the next step
+        # reads is only what git has in it.
+        run: |
+          set -eu
+          url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "${RUNNER_TEMP}/shellcheck.tar.xz" "$url"
+          echo "${SHELLCHECK_SHA256}  ${RUNNER_TEMP}/shellcheck.tar.xz" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/shellcheck"
+          tar -xJf "${RUNNER_TEMP}/shellcheck.tar.xz" \
+            --strip-components=1 -C "${RUNNER_TEMP}/shellcheck"
+          echo "${RUNNER_TEMP}/shellcheck" >> "${GITHUB_PATH}"
+
+      - name: Check run and healthcheck
+        # The only two shell scripts in the tree. Both carry a #!/bin/bash
+        # shebang, which is where shellcheck reads the dialect from, so there
+        # is no -s to pass.
+        run: |
+          shellcheck --version
+          shellcheck -S error run healthcheck
