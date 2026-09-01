@@ -382,12 +382,14 @@ changing any of them.
    fine. `run` therefore asks for one 220 and refuses to hand over without it.
    Three things about it are load-bearing: it runs *after* rsyslogd is started,
    so postfix's own `fatal:` line naming the setting is in the container log
-   above the refusal; inside `awaitGreeting` the `2> /dev/null` is attached to
-   the command substitution and not to the `exec`, because `exec … 2> /dev/null`
-   has no command to apply to and would silence the script's own stderr for the
-   rest of the container's life; and `smtpdPort` deliberately skips an smtpd
-   bound to a single address, which may be there for something that does not
-   answer this container. `healthcheck` does the opposite and checks every
+   above the refusal; inside `awaitGreeting` the `2> /dev/null` is on a group
+   *inside* the command substitution, not on the `exec`, because
+   `exec … 2> /dev/null` has no command to apply to and would silence the
+   script's own stderr for the rest of the container's life — and not on the
+   substitution either, which is what `greeting=$( … ) 2> /dev/null` reads as
+   and is not, bash applying it to the assignment where it silences nothing;
+   and `smtpdPort` deliberately skips an smtpd bound to a single address, which
+   may be there for something that does not answer this container. `healthcheck` does the opposite and checks every
    `inet` service including address-bound ones — both resolve a named endpoint
    such as `submission` through `getent services`. (issue #206, commit `1d6d8d3`)
 
