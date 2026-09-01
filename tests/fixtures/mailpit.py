@@ -1,10 +1,33 @@
+import functools
 import time
 
 import docker
 import pytest
 import requests
 
+import testcontainers.community.mailpit as mailpit_module
+
 from testcontainers.community.mailpit import MailpitContainer
+
+# Ask the container whether it is up more often than once a second.
+#
+# MailpitContainer.start() waits for a line in the log, and looks for it at the
+# library's default interval of one second. Mailpit is ready 0.19s after docker
+# starts it, measured, so the first look is too early and the second one is most
+# of a second late: 1.33s to start one against 0.29s when it is asked more
+# often, and the suite starts about nine of them.
+#
+# The wait itself is not changed -- same log line, same timeout, and it still
+# returns the moment the line is there rather than after a fixed delay. Only how
+# often it looks.
+#
+# Done by handing the library's own function a different default rather than by
+# reimplementing start() in a subclass: if a release stops going through
+# wait_for_logs, this quietly stops applying and the suite is merely as slow as
+# it is today, where a start() of our own would silently skip whatever that
+# release had added to theirs.
+mailpit_module.wait_for_logs = functools.partial(
+    mailpit_module.wait_for_logs, interval=0.05)
 
 from tests.conftest import print_log_on_failure
 from tests.helpers import once_across_workers, poll_until
