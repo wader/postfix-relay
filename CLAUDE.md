@@ -380,22 +380,35 @@ changing any of them.
    reads it leaves a container that listens, accepts and kills every session
    while `postconf -e`, `postfix check`, `/proc` and the health check all look
    fine. `run` therefore asks for one 220 and refuses to hand over without it.
-   Three things about it are load-bearing: it runs *after* rsyslogd is started,
+   Five things about it are load-bearing. It runs *after* rsyslogd is started,
    so postfix's own `fatal:` line naming the setting is in the container log
-   above the refusal; inside `awaitGreeting` the `2> /dev/null` is attached to
-   the command substitution and not to the `exec`, because `exec … 2> /dev/null`
-   has no command to apply to and would silence the script's own stderr for the
-   rest of the container's life; and `smtpdPort` deliberately skips an smtpd
-   bound to a single address, which may be there for something that does not
-   answer this container. `healthcheck` does the opposite and checks every
-   `inet` service including address-bound ones — both resolve a named endpoint
-   such as `submission` through `getent services`. (issue #206, commit `1d6d8d3`)
+   above the refusal. `smtpdPort` matches the command on `$8`, master.cf's
+   command column, and not on `$NF`: a service carries its `-o` options after
+   the command, which is what `POSTFIXMASTER_` variables are for, and `$NF`
+   there matches nothing at all — so the probe silently did not run on exactly
+   the relays that had been configured. `smtpdPort` also deliberately skips an
+   smtpd bound to a single address, which may be there for something that does
+   not answer this container. `smtpdAddress` reads `inet_interfaces` with
+   `postconf -hx`, the *expanding* form: a relay may serve only the address its
+   clients reach it on, so greeting loopback regardless refuses one that works,
+   and `-h` alone hands the probe the literal `$myhostname` that postfix's own
+   stock main.cf suggests writing. And inside `awaitGreeting` the
+   `2> /dev/null` sits on a group *inside* the command substitution: not on the
+   `exec`, because `exec … 2> /dev/null` has no command to apply to and would
+   silence the script's own stderr for the rest of the container's life, and
+   not on the substitution as `greeting=$( … ) 2> /dev/null` reads, because
+   bash applies that to the assignment and it silences nothing.
+   `healthcheck` does the opposite and checks every `inet` service including
+   address-bound ones — both resolve a named endpoint such as `submission`
+   through `getent services`. (issue #206, commit `1d6d8d3`; issue #221,
+   commit `e9017b0`; issue #240)
 
 8. **`run` has no `set -e`, and that is still load-bearing** — but not for the
    reason it once was. `dpkg-statoverride` is gone (see 10). What would break
    under errexit today is `smtpdPort=$(smtpdPort)`, where the function returns
-   1 whenever `master.cf` has no all-interfaces smtpd and the next line treats
-   an empty result as an expected state, and the `pkill -TERM saslauthd` /
+   1 whenever `master.cf` has no all-interfaces smtpd and the `if` two lines
+   below treats an empty result as an expected state, and the
+   `pkill -TERM saslauthd` /
    `pkill -TERM rsyslogd` pair in `stopDaemons`, where pkill exits 1 with
    nothing to match — the ordinary case for a container without `SASL_Passwds`
    — which would take the script down before it signals rsyslogd and waits for
