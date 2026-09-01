@@ -269,19 +269,21 @@ def _dotted_quad(hex_address):
                     for index in range(6, -2, -2))
 
 
-def exit_code_within(container, seconds=5):
+def exit_code_within(container, seconds=15):
     """The code the container exited with, or None if it is still running.
 
     docker's wait endpoint has no notion of "not yet": asking it to wait
     less than the container takes raises a read timeout, which is the
     answer rather than an error here.
 
-    Five seconds rather than fifteen: "run" waits on the daemon it
-    started in the foreground, so it hears about the death immediately and
-    the container is gone 0.2s later, measured. The wait is what a caller
-    pays when the container does *not* stop, which is the case the callers
-    below are documenting, so keeping it near the time the answer actually
-    takes is most of what those tests cost.
+    Fifteen seconds because that is what the supervision actually needs.
+    rsyslogd is a job of the start-up script and its death is seen at once,
+    but the other four daemons are noticed by the polling loop, which has to
+    come round and then confirm the reading. Measured on the image as it
+    stands, from the kill to the container being gone: rsyslogd 1.3s,
+    postsrsd and saslauthd 3.1s, the postfix master 3.1s, opendkim 7.1s. The
+    bound is a little over twice the slowest of those, and it costs nothing
+    when the container does stop, which is the outcome its caller asserts.
     """
     try:
         return container.get_wrapped_container().wait(timeout=seconds)['StatusCode']
