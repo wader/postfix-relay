@@ -375,6 +375,13 @@ offers it (`POSTFIX_smtp_tls_security_level=may`). Set it to `encrypt` when
 relaying through a provider, where an unencrypted connection is a
 misconfiguration rather than the only option.
 
+`encrypt` only means the connection was encrypted, not that it was the right
+server: it accepts any certificate. `verify` and `secure` also check the
+certificate against the trust store the image ships, which is what turns
+"nobody read this on the way" into "this went to the provider I meant".
+`POSTFIX_smtp_tls_CAfile` names that store and is set by default, so those two
+levels work without anything else being mounted.
+
 ### Client authentication
 The container includes [Postfix SASL](https://www.postfix.org/SASL_README.html) authentication options that are disabled by default.
 

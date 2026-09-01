@@ -26,6 +26,10 @@ DEFAULT_ENVIRONMENT = [
     # time from the IPv6 support of the machine doing the build.
     ('POSTFIX_inet_protocols', 'ipv4'),
     ('POSTFIX_smtp_tls_security_level', 'may'),
+    # The trust store ca-certificates puts in the image. Without it postfix
+    # has nothing to check a server certificate against, so the two levels
+    # that authenticate the next hop cannot be used at all.
+    ('POSTFIX_smtp_tls_CAfile', '/etc/ssl/certs/ca-certificates.crt'),
     ('POSTFIX_smtpd_tls_security_level', 'none'),
     # OpenDKIM: everything but the domains, which is what turns signing on.
     ('OPENDKIM_Socket', 'inet:12301@localhost'),
@@ -250,3 +254,15 @@ def test_the_image_is_a_single_debian_release(image_shell):
 
     assert exit_code == 0
     assert output.strip().startswith('13.'), output
+
+
+def test_the_trust_store_the_ca_file_names_is_in_the_image(postfix_image):
+    """The default above is only worth having if the file is there.
+
+    ca-certificates is installed for this and nothing else: opendkim's trust
+    anchor is the DNSSEC root key, not a CA bundle.
+    """
+    bundle = image_run(postfix_image, [
+        "sh", "-c", "wc -l < /etc/ssl/certs/ca-certificates.crt"])
+
+    assert int(bundle) > 100
