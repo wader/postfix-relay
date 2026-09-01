@@ -438,9 +438,8 @@ changing any of them.
     recipient side is not symmetrical:
     `recipient_canonical_classes=envelope_recipient,header_recipient`, so
     recipient addresses in headers *are* rewritten, and have been since the
-    feature landed: a bounce coming back to an SRS address carries it in its
-    `To:` as well as in its envelope, and decoding both is what makes it
-    deliverable. (issue #225, commit `bed3c5b`)
+    feature landed: a bounce carries the SRS address in its `To` as well as in
+    its envelope, and decoding both is what makes it deliverable.
 
 15. **`echo -n > /etc/opendkim.conf` truncates the packaged config on every
     start**, and the loop that rebuilds it explicitly `continue`s past
