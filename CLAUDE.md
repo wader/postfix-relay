@@ -201,7 +201,7 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 
 | Check | From | What it does |
 | --- | --- | --- |
-| **Build Image** | `ci.yml` | buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`. Nothing is pushed on a PR — the DockerHub login is skipped, and the build step sets `push: ${{ github.event_name != 'pull_request' }}` — but the build has to succeed on **all three** architectures. This is the gate that catches architecture-specific packaging problems. |
+| **Build Image** | `ci.yml` | buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`. Nothing is pushed on a PR — the DockerHub login is skipped, and the build step sets `push: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}` — but the build has to succeed on **all three** architectures. The `dependabot[bot]` half of that condition covers the branch push Dependabot makes before opening its pull request: such a run reads Dependabot secrets only, so the Actions secrets the login needs arrive empty. This is the gate that catches architecture-specific packaging problems. |
 | **Pytest** | `test.yml` | `ubuntu-latest`, Python 3.13, `pip install -r tests/requirements.txt`, `pytest --junitxml=junit/test-results.xml`. |
 | **Pytest (arm64)** | `test.yml` | The same, natively, on `ubuntu-24.04-arm`. |
 | **Event File** | `test.yml` | Uploads the triggering event payload for the reporter. |
