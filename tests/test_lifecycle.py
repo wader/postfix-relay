@@ -207,7 +207,7 @@ def test_an_interrupt_stops_the_container_cleanly(postfix_factory):
 
     wrapped.kill(signal='SIGINT')
 
-    assert wrapped.wait(timeout=30)['StatusCode'] == 0
+    assert exit_code_within(relay, seconds=30) == 0
 
 
 # Every daemon "run" starts, and what turns it on. rsyslogd is the only one it
@@ -346,5 +346,5 @@ def test_a_stop_during_start_up_is_not_reported_as_a_failure(postfix_factory):
     time.sleep(1)
     wrapped.stop(timeout=30)
 
-    assert wrapped.wait(timeout=30)['StatusCode'] == 0
+    assert exit_code_within(relay, seconds=30) == 0
     assert 'did not start' not in container_stderr(relay)
