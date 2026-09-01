@@ -417,8 +417,12 @@ volumes:
   - /your_local_path/pam_smtp:/etc/pam.d/smtp
 ```
 
-The generated `smtpd.conf` offers `CRAM-MD5 DIGEST-MD5 LOGIN PLAIN`; a mounted
-one saying `mech_list: PLAIN` is what the relay then advertises.
+The generated `smtpd.conf` offers `LOGIN PLAIN`, the two mechanisms that hand
+`saslauthd` a password to check: `CRAM-MD5` and `DIGEST-MD5` prove knowledge of
+a password without sending it, which needs a secret this check never has, so
+offering them only makes clients that pick the strongest mechanism fail. A
+mounted `smtpd.conf` saying `mech_list: PLAIN` is what the relay then
+advertises instead.
 
 `SASL_Passwds` still has to be set to something non-empty, whatever those files
 contain. It is what switches the whole SASL block on, and `saslauthd` is started

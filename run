@@ -314,10 +314,16 @@ fi
 # Checking for user specified passwd file
 if [ ! -z "$SASL_Passwds" ] ; then
   # Creating auth settings file
+  #
+  # Only the mechanisms that hand saslauthd a password to check are offered:
+  # it verifies a password, and CRAM-MD5 and DIGEST-MD5 prove knowledge of one
+  # without sending it, which needs the secret this check never has. Offering
+  # them means a client that picks the strongest mechanism on the list -- what
+  # msmtp and others do -- fails against a relay that is configured correctly.
   if [ ! -e /etc/postfix/sasl/smtpd.conf ] ; then
     cat <<'EOF' > /etc/postfix/sasl/smtpd.conf
 pwcheck_method: saslauthd
-mech_list: CRAM-MD5 DIGEST-MD5 LOGIN PLAIN
+mech_list: LOGIN PLAIN
 EOF
   fi
   

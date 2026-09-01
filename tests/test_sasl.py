@@ -12,8 +12,8 @@ import pytest
 
 from testcontainers.community.mailpit import MailpitUser
 
-from tests.helpers import (container_exec, container_log, restart, send,
-                           smtp_connect, wait_for_log)
+from tests.helpers import (container_exec, container_log, esmtp_features, restart,
+                           send, smtp_connect, wait_for_log)
 
 PASSWD_FILE = '/etc/postfix/sasl/sasl_passwds'
 USER, PASSWORD = 'myuser', 'mypassword'
@@ -147,8 +147,8 @@ def test_mounted_sasl_configuration_is_not_overwritten(postfix_image, postfix_fa
 
     with smtp_connect(relay) as smtp:
         smtp.ehlo()
-        # The generated file would have offered CRAM-MD5, DIGEST-MD5 and LOGIN
-        # as well, so the mounted mech_list is the one in use.
+        # The generated file would have offered LOGIN as well, so the
+        # mounted mech_list is the one in use.
         assert smtp.esmtp_features['auth'].split() == ['PLAIN']
 
         smtp.user, smtp.password = USER, PASSWORD
@@ -266,14 +266,17 @@ def test_the_generated_pam_profile_reads_the_password_file(authenticated_relay):
 
 def test_the_generated_sasl_configuration_offers_the_documented_mechanisms(
         authenticated_relay):
-    """The two that work with a PAM password check are offered along with
-    the two that cannot: a client picking CRAM-MD5 first is why the tests
-    name the mechanism instead of letting the library choose."""
+    """Only the two a PAM password check can answer.
+
+    CRAM-MD5 and DIGEST-MD5 were offered as well, which is why the tests
+    below name the mechanism instead of letting the library choose: a client
+    that picks the strongest one on offer never got past the challenge.
+    """
     configuration = container_exec(
         authenticated_relay, ["cat", "/etc/postfix/sasl/smtpd.conf"])
 
     assert 'pwcheck_method: saslauthd' in configuration
-    assert 'mech_list: CRAM-MD5 DIGEST-MD5 LOGIN PLAIN' in configuration
+    assert 'mech_list: LOGIN PLAIN' in configuration
 
 
 def test_the_upstream_password_never_reaches_the_log(postfix_shared):
@@ -295,3 +298,16 @@ def test_the_upstream_password_is_not_readable_by_every_user(postfix_shared):
     relay = postfix_shared(env=UPSTREAM_CREDENTIALS)
 
     assert container_exec(relay, "stat -c %a /etc/postfix/sasl_passwd").strip() == '600'
+
+
+def test_only_the_mechanisms_that_can_authenticate_are_offered(authenticated_relay):
+    """saslauthd is handed a password and checks it.
+
+    CRAM-MD5 and DIGEST-MD5 prove knowledge of a password without sending
+    one, so they cannot be checked that way and can only ever fail. A client
+    that picks the strongest mechanism offered rather than falling back
+    through the list then fails against a relay set up exactly as documented.
+    """
+    _, _, features = esmtp_features(authenticated_relay)
+
+    assert sorted(features['auth'].split()) == ['LOGIN', 'PLAIN']
