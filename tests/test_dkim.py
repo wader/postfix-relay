@@ -9,7 +9,8 @@ import re
 import dkim
 import pytest
 
-from tests.helpers import (container_exec, container_log, dkim_dns_record, image_run,
+from tests.helpers import (container_exec, container_log, container_stderr,
+                           dkim_dns_record, exit_code_within, image_run,
                            listening_sockets, postconf, restart, send)
 
 KEY_PATH = '/etc/opendkim/keys/example.com/sel1.private'
@@ -269,9 +270,17 @@ def test_the_record_printed_on_start_up_is_the_one_to_publish(signing):
 
     assert record.startswith('v=DKIM1;')
     assert 'p=' in record
-    # The log carries the file, quoted strings and all.
-    for part in re.findall(r'"([^"]*)"', record):
-        assert part in log or record in log
+    # The log carries the file as opendkim-genkey wrote it, which is the
+    # record split over quoted strings the way a zone file wants it. Taken
+    # from the file rather than from the joined record: dkim_dns_record has
+    # already removed the quotes, so looking for them in its result found
+    # nothing to check and the loop never ran.
+    published = container_exec(signing, ["cat", "/etc/opendkim/keys/example.com/sel1.txt"])
+    chunks = re.findall(r'"([^"]*)"', published)
+
+    assert chunks
+    for chunk in chunks:
+        assert chunk in log
 
 
 def test_the_published_key_is_the_public_half_of_the_generated_one(signing):
@@ -401,3 +410,21 @@ def test_a_signed_message_still_verifies_after_its_envelope_is_rewritten(
     assert message['From']['Address'] == 'sender@example.com'
     assert verifies(mailpit.raw(message['ID']),
                     dkim_dns_record(relay, 'example.com', 'sel1'))
+
+
+def test_a_key_that_could_not_be_generated_stops_the_container(postfix_factory):
+    """Signing that cannot happen has to stop the relay, not the mail.
+
+    With the key directory in the way -- a read-only keys volume is the same
+    case -- the tables still named a key that was never written, opendkim
+    started without being able to load it, and the milter answered every
+    message with "451 4.7.1 Service unavailable": a relay that accepts no
+    mail at all while docker reports it healthy.
+    """
+    relay = postfix_factory(
+        env={'OPENDKIM_DOMAINS': 'example.com'},
+        files={'/etc/opendkim/keys/example.com': "not a directory\n"},
+        wait_ready=False)
+
+    assert exit_code_within(relay, seconds=20) == 1
+    assert 'Could not generate a DKIM key' in container_stderr(relay)
