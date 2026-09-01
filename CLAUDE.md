@@ -46,7 +46,7 @@ why merge commits name someone else's namespace.
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment is also where the check names are recorded. |
-| `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image. No pip ecosystem. |
+| `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`. |
 
 There is no `CONTRIBUTING.md`, no linter config of any kind and no per-file
 license header — see [Conventions](#conventions).
@@ -576,14 +576,9 @@ changing any of them.
 
 ### Comments that are currently wrong
 
-Four comments in the tree contradict the code they describe. Do not take them
+Two comments in the tree contradict the code they describe. Do not take them
 as evidence when auditing, and fix them where you are already editing the file:
 
-- `.github/dependabot.yml` says `tests/requirements.txt` pins no versions and
-  leaves out a pip ecosystem for that reason — it pins all six, so the premise
-  for omitting the ecosystem no longer holds.
-- `tests/test_image.py` still credits "bump" with keeping the base pin current
-  (invariant 31).
 - `tests/test_sasl.py` still describes the removed `dpkg-statoverride`
   mechanism in a docstring (invariant 10); the assertion it guards is correct.
 - the comment above the SRS canonical maps in `run` claims envelope-only
