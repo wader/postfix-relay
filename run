@@ -70,22 +70,28 @@ awaitGreeting()
 
     for try in 1 2 3 4 5 ; do
       # The connection is opened inside a subshell, and the redirection that
-      # silences a refused one is on the substitution rather than on "exec":
-      # "exec ... 2> /dev/null" has no command to apply to, so it would send
-      # this script's own stderr to /dev/null for the rest of the container's
-      # life, taking every message below with it.
+      # silences a refused one is on a group *inside* the substitution. Not on
+      # "exec": "exec ... 2> /dev/null" has no command to apply to, so it would
+      # send this script's own stderr to /dev/null for the rest of the
+      # container's life, taking every message below with it. And not on the
+      # substitution, which is what "greeting=$( ... ) 2> /dev/null" reads as
+      # and is not -- bash applies that to the assignment, which writes
+      # nothing, so it silences nothing.
       greeting=$(
-        exec 3<>"/dev/tcp/$address/$port" || exit
-        # Short: master accepts at once when an smtpd can run, and holds the
-        # connection open with nothing behind it when one cannot -- it keeps
-        # the socket while it throttles the service it could not start. Five
-        # tries of this is the whole cost of refusing a broken relay.
-        read -t 2 -r line <&3
-        # QUIT rather than dropping the connection, so the one line this
-        # leaves in the log is a disconnect and not a lost connection.
-        printf 'QUIT\r\n' >&3
-        echo "$line"
-      ) 2> /dev/null
+        {
+          exec 3<>"/dev/tcp/$address/$port" || exit
+          # Short: master accepts at once when an smtpd can run, and holds
+          # the connection open with nothing behind it when one cannot -- it
+          # keeps the socket while it throttles the service it could not
+          # start. Five tries of this is the whole cost of refusing a broken
+          # relay.
+          read -t 2 -r line <&3
+          # QUIT rather than dropping the connection, so the one line this
+          # leaves in the log is a disconnect and not a lost connection.
+          printf 'QUIT\r\n' >&3
+          echo "$line"
+        } 2> /dev/null
+      )
 
       case "$greeting" in 220*) return 0 ;; esac
       sleep 0.2
