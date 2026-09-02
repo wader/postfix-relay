@@ -354,9 +354,27 @@ stopDaemons()
     [ -n "$stopped" ] && return
     stopped=1
 
+    # postfix stops through its own script, which finds master by pid file.
+    # The other two init scripts cannot find anything: both identify the
+    # process with start-stop-daemon's --exec, which resolves /proc/<pid>/exe,
+    # and reading that link across a uid boundary needs CAP_SYS_PTRACE, which
+    # docker does not grant. So opendkim's script says "none killed" and
+    # postsrsd's, which passes --oknodo, reports a success it did not have --
+    # neither daemon is signalled at all, and the log says otherwise.
+    #
+    # Signalling them directly reaches postsrsd everywhere: the process that
+    # holds its pid stays root, and only its chrooted worker drops privileges.
+    # opendkim drops its own, so this reaches it under docker's default
+    # capabilities and not under the smaller set the README recommends, which
+    # leaves out CAP_KILL. Nothing can there -- see invariant 9 -- and what it
+    # then does is what the init script already left it doing: waiting for
+    # docker to kill the container. Both are silenced because both have a pid
+    # they may not signal there: postsrsd matches two, and the chrooted worker
+    # that dropped privileges is refused even though the root process holding
+    # it is signalled and takes the worker with it.
     service postfix stop
-    service opendkim stop
-    service postsrsd stop
+    pkill -x -TERM opendkim 2> /dev/null
+    pkill -x -TERM postsrsd 2> /dev/null
     pkill -TERM saslauthd
     pkill -TERM rsyslogd
     wait "$rsyslogPid" 2> /dev/null

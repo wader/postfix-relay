@@ -350,6 +350,35 @@ def test_a_relay_that_names_its_interfaces_with_a_macro_still_starts(postfix_fac
     assert mailpit.wait_for_message('named by macro')
 
 
+def test_the_stop_path_does_not_claim_daemons_it_never_signalled(postfix_factory):
+    """Two of the three init scripts cannot find their daemon in a container.
+
+    opendkim's and postsrsd's both identify the process with
+    start-stop-daemon's --exec, which resolves /proc/<pid>/exe, and both
+    daemons have dropped to their own user by then: reading that link across a
+    uid boundary needs CAP_SYS_PTRACE, which docker does not grant by default
+    and the capability list in the README does not ask for. Neither daemon was
+    signalled at all -- opendkim's script said "none killed" and postsrsd's,
+    which passes --oknodo, reported success it had not had.
+
+    Those two lines are what the mistake looks like from outside, and their
+    absence is what this pins: a shutdown that says nothing about a daemon it
+    did not stop, because it stops it.
+    """
+    relay = postfix_factory(env={'OPENDKIM_DOMAINS': 'example.com',
+                                 'POSTSRSD_SRS_DOMAIN': 'srs.example.com'})
+
+    poll_until(lambda: process_running(relay, 'postsrsd'),
+               description="postsrsd to be running before the container is stopped")
+
+    relay.get_wrapped_container().stop(timeout=30)
+
+    log = container_log(relay) + container_stderr(relay)
+
+    assert 'none killed' not in log
+    assert 'Stopping Postfix Sender Rewriting Scheme daemon' not in log
+
+
 def test_a_stop_during_start_up_is_not_reported_as_a_failure(postfix_factory):
     """SIGTERM before the relay is up is still a stop the operator asked for.
 
@@ -363,7 +392,12 @@ def test_a_stop_during_start_up_is_not_reported_as_a_failure(postfix_factory):
         wait_ready=False)
     wrapped = relay.get_wrapped_container()
 
-    time.sleep(1)
+    # Waited for rather than slept through. "DNS records:" is printed before
+    # the first key is generated and start-up runs for several seconds after
+    # it, so the signal lands inside start-up because the log says start-up is
+    # running -- not because a second happened to be the right guess on the
+    # machine it was written on.
+    wait_for_log(relay, "DNS records:")
     wrapped.stop(timeout=30)
 
     assert exit_code_within(relay, seconds=30) == 0
