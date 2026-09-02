@@ -157,6 +157,14 @@ def test_a_bounce_to_a_rewritten_address_finds_the_original_sender(shared_srs_re
     message = mailpit.wait_for_message('the bounce')
 
     assert [to['Address'] for to in message['Bcc']] == ['sender@example.com']
+    # The envelope is what was decoded, and only the envelope. The To: header
+    # still carries the SRS address: recipient_canonical_classes names
+    # header_recipient, but postfix rewrites headers only for clients matching
+    # local_header_rewrite_clients, which defaults to this container's own
+    # addresses -- and a relay's clients reach it over the network. That is
+    # also why mailpit reports the decoded recipient as a Bcc above: it
+    # matches no address in the headers.
+    assert [to['Address'] for to in message['To']] == [rewritten]
 
 
 def test_postsrsd_is_only_reachable_from_the_container(shared_srs_relay):

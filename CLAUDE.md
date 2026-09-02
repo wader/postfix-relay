@@ -474,9 +474,15 @@ changing any of them.
     would rewrite the visible `From:`, which is not what SRS is for. The
     recipient side is not symmetrical:
     `recipient_canonical_classes=envelope_recipient,header_recipient`, so
-    recipient addresses in headers *are* rewritten, and have been since the
-    feature landed: a bounce carries the SRS address in its `To` as well as in
-    its envelope, and decoding both is what makes it deliverable.
+    that second class buys less than it reads as. Postfix rewrites headers
+    only for clients matching `local_header_rewrite_clients`, which defaults
+    to `permit_inet_interfaces` — the container's own addresses — and the
+    containers this relays for reach it over the docker network. Measured on
+    the built image, same message both ways: from the network the `To:` keeps
+    the SRS address, from loopback it is decoded. The envelope is decoded
+    either way, and it is the envelope that makes a bounce deliverable, so
+    nothing was ever wrong with the behaviour — only with the sentence that
+    described it.
 
 15. **`echo -n > /etc/opendkim.conf` truncates the packaged config on every
     start**, and the loop that rebuilds it explicitly `continue`s past
