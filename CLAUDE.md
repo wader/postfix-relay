@@ -152,8 +152,10 @@ it only ever builds the host's — follow the cross-build recipe in
 failure there means the same thing.
 
 There is no unit test layer: nothing runs without a docker daemon. Most tests
-start a real relay; the exceptions are in `test_image.py`, which only
-`docker inspect`s the built image. When a test fails, `conftest.py` prints the
+start a real relay; the exception is `test_image.py`, which starts none — it
+reads `docker inspect` output through `image_config`, asks a throwaway `sleep`
+container about the image's files through its `image_shell` fixture, and runs a
+command in one with `image_run`. When a test fails, `conftest.py` prints the
 logs of the containers it used, so `-o log_cli=true` is rarely what you want.
 
 ### Build
@@ -195,20 +197,26 @@ it lets through because of the threshold alone.
 With shellcheck 0.11.0, which is the version `lint.yml` pins:
 
 ```
-run:68:5           SC2034 (warning)  try appears unused
-run:166:23         SC2308 (note)     'expr match' has unspecified results
-run:422,423        SC2016 (note)     expressions don't expand in single quotes
-run:422            SC2028 (note)     echo may not expand escape sequences
-run:432,435,438    SC2086 (note)     double quote to prevent word splitting
-healthcheck:32:46  SC2086 (note)     double quote to prevent word splitting
+run          SC2034 (warning)  try appears unused, in awaitGreeting
+run          SC2308 (note)     'expr match' has unspecified results
+run          SC2016 (note)     expressions don't expand in single quotes, twice
+run          SC2028 (note)     echo may not expand escape sequences
+run          SC2086 (note)     double quote to prevent word splitting, three times
+healthcheck  SC2086 (note)     double quote to prevent word splitting
 ```
+
+Deliberately without line numbers: they moved on every one of these entries
+within a few days of the block being written, while the findings themselves did
+not. `shellcheck -f gcc run healthcheck` prints the current ones.
 
 Two of those must not be "fixed": the `SC2034` in `awaitGreeting` is a retry
 counter the loop body has no reason to read (the identical construct in
 `awaitProcess` is not flagged, which is a quirk of the tool), and the `SC2086`
 in `healthcheck` is deliberate word-splitting — `listening()` builds
 `proc="/proc/net/tcp /proc/net/tcp6"` and awk must receive both paths. Quoting
-it, as shellcheck suggests, breaks IPv6 listener detection. `-S warning` fails
+it, as shellcheck suggests, does not degrade the check to IPv4: awk is handed
+one filename with a space in it, cannot open it, and every port then reads as
+not listening. `-S warning` fails
 on the first of those, which is why the gate is at `-S error` and not a notch
 higher.
 
@@ -233,7 +241,7 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 | **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error run healthcheck`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
-A sixth, **Pytest (arm/v7, emulated)**, runs only on `master`, on a manual
+A seventh, **Pytest (arm/v7, emulated)**, runs only on `master`, on a manual
 dispatch, or on a pull request labelled `test-emulated` — and the label is read
 from the event that started the run, so it takes effect on the *next* push to
 the branch. It pins the QEMU binfmt image, builds `linux/arm/v7`, and runs
@@ -380,7 +388,7 @@ changing any of them.
    reads it leaves a container that listens, accepts and kills every session
    while `postconf -e`, `postfix check`, `/proc` and the health check all look
    fine. `run` therefore asks for one 220 and refuses to hand over without it.
-   Three things about it are load-bearing: it runs *after* rsyslogd is started,
+   Five things about it are load-bearing. It runs *after* rsyslogd is started,
    so postfix's own `fatal:` line naming the setting is in the container log
    above the refusal; inside `awaitGreeting` the `2> /dev/null` is on a group
    *inside* the command substitution, not on the `exec`, because
@@ -388,21 +396,32 @@ changing any of them.
    script's own stderr for the rest of the container's life — and not on the
    substitution either, which is what `greeting=$( … ) 2> /dev/null` reads as
    and is not, bash applying it to the assignment where it silences nothing;
-   and `smtpdPort` deliberately skips an smtpd bound to a single address, which
-   may be there for something that does not answer this container. `healthcheck` does the opposite and checks every
-   `inet` service including address-bound ones — both resolve a named endpoint
-   such as `submission` through `getent services`. (issue #206, commit `1d6d8d3`)
+   `smtpdPort` matches the command on `$8`, master.cf's command column, and not
+   on `$NF`: a service carries its `-o` options after the command, which is what
+   `POSTFIXMASTER_` variables are for, so `$NF` matched nothing at all and the
+   probe silently did not run on exactly the relays that had been configured.
+   `smtpdPort` also deliberately skips an smtpd bound to a single address, which
+   may be there for something that does not answer this container. And
+   `smtpdAddress` reads `inet_interfaces` with `postconf -hx`, the *expanding*
+   form: a relay may serve only the address its clients reach it on, so greeting
+   loopback regardless refuses one that works, and `-h` alone hands the probe the
+   literal `$myhostname` that postfix's own stock main.cf suggests writing.
+   `healthcheck` does the opposite and checks every `inet` service including
+   address-bound ones — both resolve a named endpoint such as `submission`
+   through `getent services`. (issue #206, commit `1d6d8d3`; issue #221,
+   commit `e9017b0`)
 
 8. **`run` has no `set -e`, and that is still load-bearing** — but not for the
    reason it once was. `dpkg-statoverride` is gone (see 10). What would break
    under errexit today is `smtpdPort=$(smtpdPort)`, where the function returns
-   1 whenever `master.cf` has no all-interfaces smtpd and the next line treats
-   an empty result as an expected state, and the `pkill -TERM saslauthd` /
-   `pkill -TERM rsyslogd` pair in `stopDaemons`, where pkill exits 1 with
-   nothing to match — the ordinary case for a container without `SASL_Passwds`
-   — which would take the script down before it signals rsyslogd and waits for
-   it. (`[ -n "$stopped" ] && return` is *not* such a case: bash's errexit
-   ignores a failing command in an `&&` list other than the last.) Restarting a
+   1 whenever `master.cf` has no all-interfaces smtpd and the `if` two lines
+   below treats an empty result as an expected state, and the four `pkill`s in
+   `stopDaemons` — `opendkim`, `postsrsd`, `saslauthd`, `rsyslogd` — where pkill
+   exits 1 with nothing to match, which is the ordinary case for every one of
+   them on a relay that enabled none of those features, and which would take the
+   script down before it signals rsyslogd and waits for it.
+   (`[ -n "$stopped" ] && return` is *not* such a case: bash's errexit ignores a
+   failing command in an `&&` list other than the last.) Restarting a
    container re-runs the whole script over a filesystem that already has its
    results, which is also why `run` removes the four stale pid files near the
    top. Note that refusing to relay is now the normal response to a daemon that
@@ -548,7 +567,12 @@ changing any of them.
     default, because Debian's postinst otherwise writes `inet_protocols` from
     whatever the *build machine* supported — the published image shipped `all`,
     which is half-configured when `mynetworks=0.0.0.0/0` covers no IPv6
-    address. (commit `8e8e89c`)
+    address. `POSTFIX_smtp_tls_CAfile=/etc/ssl/certs/ca-certificates.crt` is
+    pinned for a related reason: without it the smtp client has nothing to check
+    a server certificate against, so the two security levels that authenticate
+    the next hop cannot be used at all. `CAfile` and not `CApath`, because the
+    client opens it while still root, before chrooting into the queue, which a
+    directory of hashed links would not survive. (commit `8e8e89c`)
 
 24. **`${v//__/\/}` replaces every `__`, not the first.** The README promises
     "all double `__` symbols"; the code used to substitute only the first
@@ -556,13 +580,17 @@ changing any of them.
     service name holds at most one slash — the code was changed to match the
     documented rule rather than to rely on that. (commit `90839a0`)
 
-25. **`perl` is named explicitly in the `Dockerfile` apt list.** It lands in
+25. **`perl` and `openssl` are named explicitly in the `Dockerfile` apt list.**
+    `perl` lands in
     the image anyway today, but only through opendkim-tools' `perl:any`
     dependency, which `perl-base` cannot satisfy — while `qshape`, a perl
     script shipped in the postfix package, is named in no postfix dependency at
     all. Naming perl adds no package and no bytes now, and keeps a correct
     narrowing of that opendkim dependency from taking `qshape` down on a
     routine base bump. `tests/test_qshape.py` exists for exactly this.
+    `openssl` is named for the same class of reason: `run` uses `openssl pkey`
+    to refuse a DKIM key it cannot read, so the binary is a dependency of the
+    entrypoint rather than of any package the image happens to install.
     (commit `2e420c4`)
 
 26. **The image has no `ENTRYPOINT`, only `CMD ["/root/run"]`**, which is what
