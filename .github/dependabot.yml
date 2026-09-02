@@ -46,3 +46,20 @@ updates:
     directory: /tests
     schedule:
       interval: weekly
+
+  # The mailpit image, which is the server every relayed message is read back
+  # from. It lives in a string in tests/fixtures/mailpit.py, and no ecosystem
+  # reads Python, so tests/mailpit.Dockerfile names it where this one looks --
+  # dependabot's docker file fetcher matches any file whose name contains
+  # "dockerfile" -- and the fixture reads the tag back out of that file.
+  #
+  # Unlike the base image above, a bump here is an ordinary semver minor or
+  # patch, so the auto-merge rule applies to it. That is the right way round:
+  # this is the test peer rather than the shipped image, every one of these
+  # pull requests runs the whole suite against the new mailpit, and the suite
+  # is the only thing that can say whether it still answers as the tests
+  # expect. One that does not stays red and waits for a person.
+  - package-ecosystem: docker
+    directory: /tests
+    schedule:
+      interval: weekly

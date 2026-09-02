@@ -1,4 +1,5 @@
 import functools
+import os
 import time
 
 import docker
@@ -32,7 +33,31 @@ mailpit_module.wait_for_logs = functools.partial(
 from tests.conftest import print_log_on_failure
 from tests.helpers import once_across_workers, poll_until
 
-IMAGE = "axllent/mailpit:v1.27.11"
+def _pinned_image():
+    """The image tag, read from the file a version bot can see.
+
+    The suite reads every relayed message back from mailpit, so a release that
+    renames a JSON field fails a swathe of it at once -- which makes this the
+    dependency most worth keeping current, and the one no ecosystem could see
+    while it was a string in this module. tests/mailpit.Dockerfile names it
+    where Dependabot looks; this reads it back, so the two cannot drift and a
+    bump is one line in one file.
+
+    A missing or unparseable anchor raises. Falling back to a version written
+    here would restore exactly what this replaces: a constant that works and
+    that nothing updates.
+    """
+    anchor = os.path.join(os.path.dirname(__file__), os.pardir, 'mailpit.Dockerfile')
+
+    with open(anchor, encoding='utf-8') as lines:
+        for line in lines:
+            if line.startswith('FROM '):
+                return line[len('FROM '):].strip()
+
+    raise RuntimeError(f"no FROM line to read the mailpit image from in {anchor}")
+
+
+IMAGE = _pinned_image()
 
 
 class Mailpit:
