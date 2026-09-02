@@ -34,16 +34,6 @@ def logged_message_id(container, recipient):
     return re.search(rf'{queue_id}: message-id=(\S+)', log).group(1)
 
 
-def raw_headers(mailpit, message):
-    """The header block as it arrived.
-
-    Read from the stored message rather than from the parsed one: mailpit
-    fills in a Message-ID of its own when a message has none, so its JSON
-    cannot answer whether the relay added one.
-    """
-    return mailpit.raw(message['ID']).split(b'\r\n\r\n', 1)[0].decode()
-
-
 def test_helo_is_accepted_as_well_as_ehlo(postfix, mailpit):
     """A client that speaks plain SMTP has to be able to relay too."""
     smtp = smtplib.SMTP(postfix.get_container_host_ip(),
@@ -279,14 +269,25 @@ def test_an_unqualified_address_is_qualified_with_the_relay_name(postfix, mailpi
 
 
 def test_a_quoted_local_part_is_relayed(postfix, mailpit):
-    """Legal, rare, and the kind of address that gets mangled on the way."""
+    """Legal, rare, and the kind of address that gets mangled on the way.
+
+    RFC 5321 4.1.2 defines a local part as a Dot-string *or* a Quoted-string,
+    so the quotes are part of the address and a relay that drops them changes
+    who the message is for.
+
+    Read from what the relay handed to the next hop rather than from what the
+    next hop did with it. Those are different questions, and only the first is
+    this image's: mailpit answers "553 5.1.3 The address is not a valid RFC
+    5321 address" to this recipient from v1.28.3 on, so asserting on the
+    stored message made the test a test of the peer, and pinned the suite to
+    a mailpit older than that. The peer is still asked for, so that this is a
+    real delivery attempt to a server that is there rather than a deferral.
+    """
     send(postfix, recipients=('"odd user"@example.com',), subject='quoted local part')
 
-    message = mailpit.wait_for_message('quoted local part')
+    handed_over = wait_for_log(postfix, 'to=<"odd user"@example.com>')
 
-    # Read from the stored message: the quotes are part of the address and
-    # a parser that drops them changes who the message is for.
-    assert '"odd user"@example.com' in raw_headers(mailpit, message)
+    assert 'to=<"odd user"@example.com>' in handed_over
 
 
 def test_an_address_with_a_plus_is_relayed_untouched(postfix, mailpit):
