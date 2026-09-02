@@ -742,6 +742,10 @@ docker exec <container> postqueue -j | jq -r '.recipients[].delay_reason' | sort
 This project uses [testcontainers](https://testcontainers.com/) with [pytest](https://docs.pytest.org/) for integration testing.
 
 [Mailpit](https://mailpit.axllent.org/) is also used to simulate a remote SMTP server.
+Its version is pinned in `tests/mailpit.Dockerfile`, which is where to change it:
+that file is never built, it exists so that Dependabot can offer a bump to a
+version the tests otherwise name only in Python, and `tests/fixtures/mailpit.py`
+reads the tag back out of it.
 
 ```bash
 # Create and enable python virtual environment

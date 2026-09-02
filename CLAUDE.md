@@ -40,7 +40,8 @@ why merge commits name someone else's namespace.
 | `tests/requirements.txt` | Six pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not. |
 | `tests/fixtures/shared_network.py` | Session-scoped `shared_network`: a testcontainers `Network()` with a generated, labelled name — not a fixed one, so an interrupted run leaves nothing for the next one to collide with. |
 | `tests/fixtures/postfix.py` | Six fixtures: `postfix_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH`. |
-| `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, pinned at `axllent/mailpit:<tag>`: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
+| `tests/mailpit.Dockerfile` | Not built and no part of any image. One `FROM axllent/mailpit:<tag>` line, so that Dependabot's docker ecosystem — whose file fetcher matches any name containing `dockerfile` — can offer a bump to the test peer. `tests/fixtures/mailpit.py` reads the tag back out of it. |
+| `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, whose image is read from `tests/mailpit.Dockerfile` rather than written here: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
@@ -49,7 +50,7 @@ why merge commits name someone else's namespace.
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment is also where the check names are recorded. |
-| `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`. |
+| `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests` for the mailpit anchor. |
 
 There is no `CONTRIBUTING.md`, no linter *config* of any kind — `lint.yml`
 passes its one flag on the command line — and no per-file license header — see
@@ -91,6 +92,9 @@ tests/test_*.py
 
          mailpit (function) ──> mailpit_container (session) ──> mailpit_image (session)
          mailpit_factory (function) ──────────────────────────────┘
+                                                                    │
+                                          tests/mailpit.Dockerfile ─┘
+                                          (the tag, where dependabot can see it)
 
          docker_volume (function)   -- takes no fixtures; creates and removes
                                        a docker volume and nothing else
@@ -655,3 +659,19 @@ changing any of them.
     and a date is not a semver minor or patch, so base-image PRs never match
     the auto-merge rule and always wait for review. A suite change
     (trixie → forky) is a deliberate edit, as it was before. (commit `5de83d0`)
+
+32. **`tests/mailpit.Dockerfile` is never built, and both halves of it are
+    load-bearing.** It exists because Dependabot cannot read a version out of a
+    Python module, and the mailpit image is the one dependency most worth
+    keeping current: the suite reads every relayed message back from it. The
+    *name* is what makes it visible — the docker file fetcher selects on
+    `/dockerfile|containerfile/i`, an unanchored match on the base name, so
+    anything containing "dockerfile" is picked up and nothing else is. The
+    *directory* is why `.github/dependabot.yml` has a second `docker` entry on
+    `/tests`: `repo_contents` lists the configured directory and does not
+    recurse, so the base-image entry on `/` neither sees this file nor is
+    disturbed by it. And `tests/fixtures/mailpit.py` reads the tag back out
+    rather than repeating it, raising when the file is missing or has no
+    `FROM` line: a fallback to a version written in the module would work
+    perfectly and restore exactly the invisible constant this replaces.
+    (issue #235)
