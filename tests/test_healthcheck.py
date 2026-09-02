@@ -247,12 +247,16 @@ def test_the_check_writes_nothing_to_the_log(relay_factory):
     them is what keeps a connect and a disconnect out of the log each time.
     """
     relay = relay_factory()
-    # rsyslogd writes its own start line once it has finished starting, which
-    # is after "run" has started postfix and can be after the relay answers,
-    # the moment the factory calls it started. Snapshotting before that line
-    # lands leaves it to arrive during the loop below, where it reads as a
-    # line the health check wrote.
-    before = wait_for_log(relay, "rsyslogd:")
+    # Start-up is not over when the relay answers, which is the moment the
+    # factory calls it started, and the snapshot has to be taken after the
+    # last line it writes or that line arrives during the loop below and
+    # reads as one the health check wrote. Two things land late: rsyslogd
+    # writes its own start line once it has finished starting, and "run"
+    # then asks smtpd for a greeting, which logs a connect and the disconnect
+    # below. The disconnect is the last of them -- the probe sends QUIT
+    # rather than dropping the connection precisely so that it is a
+    # disconnect and not a lost connection.
+    before = wait_for_log(relay, "disconnect from localhost")
 
     for _ in range(5):
         assert run_healthcheck(relay, expected=0)[0] == 0
