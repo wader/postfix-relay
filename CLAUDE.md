@@ -659,3 +659,19 @@ changing any of them.
     and a date is not a semver minor or patch, so base-image PRs never match
     the auto-merge rule and always wait for review. A suite change
     (trixie → forky) is a deliberate edit, as it was before. (commit `5de83d0`)
+
+32. **`tests/mailpit.Dockerfile` is never built, and both halves of it are
+    load-bearing.** It exists because Dependabot cannot read a version out of a
+    Python module, and the mailpit image is the one dependency most worth
+    keeping current: the suite reads every relayed message back from it. The
+    *name* is what makes it visible — the docker file fetcher selects on
+    `/dockerfile|containerfile/i`, an unanchored match on the base name, so
+    anything containing "dockerfile" is picked up and nothing else is. The
+    *directory* is why `.github/dependabot.yml` has a second `docker` entry on
+    `/tests`: `repo_contents` lists the configured directory and does not
+    recurse, so the base-image entry on `/` neither sees this file nor is
+    disturbed by it. And `tests/fixtures/mailpit.py` reads the tag back out
+    rather than repeating it, raising when the file is missing or has no
+    `FROM` line: a fallback to a version written in the module would work
+    perfectly and restore exactly the invisible constant this replaces.
+    (issue #235)

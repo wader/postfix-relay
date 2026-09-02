@@ -1,7 +1,9 @@
 # Not built, and no part of any image. This file exists so that the version of
 # the mailpit image can be seen by a bot that only understands Dockerfiles:
 # Dependabot's docker ecosystem matches any file whose name contains
-# "dockerfile", and .github/dependabot.yml points one at this directory.
+# "dockerfile", and .github/dependabot.yml points one at this directory --
+# which it has to, because that fetcher lists the directory it is given and
+# does not recurse into others.
 #
 # tests/fixtures/mailpit.py reads the tag back out of the line below, so this
 # is the one place the version is written and there is nothing to keep in step

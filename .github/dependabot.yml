@@ -51,7 +51,10 @@ updates:
   # from. It lives in a string in tests/fixtures/mailpit.py, and no ecosystem
   # reads Python, so tests/mailpit.Dockerfile names it where this one looks --
   # dependabot's docker file fetcher matches any file whose name contains
-  # "dockerfile" -- and the fixture reads the tag back out of that file.
+  # "dockerfile" -- and the fixture reads the tag back out of that file. The
+  # directory has to be named: the fetcher lists the one it is given and does
+  # not recurse, so the base image entry on "/" neither sees this file nor is
+  # disturbed by it.
   #
   # Unlike the base image above, a bump here is an ordinary semver minor or
   # patch, so the auto-merge rule applies to it. That is the right way round:
