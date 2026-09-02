@@ -312,7 +312,13 @@ Notes a contributor will hit:
   current instances, and `xfail_strict` is not set in `pytest.ini`, so
   `strict=True` has to be written on each marker.
 - **Docs.** User-visible behaviour goes in `README.md`. If a change makes the
-  README wrong, the change is not finished.
+  README wrong, the change is not finished. The same holds for this file, and
+  it is the half that gets forgotten: it describes the tree, so a change to
+  `run`, `healthcheck`, the workflows or the fixtures can leave it wrong
+  without touching it. Before pushing one, grep this file for what you moved —
+  a count, a line number, an enumeration, a claim about what a script does.
+  Counts and line numbers are the first to rot, and are better replaced by
+  what they were being used to say than refreshed.
 
 ## Non-obvious invariants
 
