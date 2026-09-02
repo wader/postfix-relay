@@ -389,9 +389,10 @@ changing any of them.
    substitution either, which is what `greeting=$( … ) 2> /dev/null` reads as
    and is not, bash applying it to the assignment where it silences nothing;
    and `smtpdPort` deliberately skips an smtpd bound to a single address, which
-   may be there for something that does not answer this container. `healthcheck` does the opposite and checks every
-   `inet` service including address-bound ones — both resolve a named endpoint
-   such as `submission` through `getent services`. (issue #206, commit `1d6d8d3`)
+   may be there for something that does not answer this container. `healthcheck`
+   does the opposite and checks every `inet` service including address-bound
+   ones — both resolve a named endpoint such as `submission` through
+   `getent services`. (issue #206, commit `1d6d8d3`)
 
 8. **`run` has no `set -e`, and that is still load-bearing** — but not for the
    reason it once was. `dpkg-statoverride` is gone (see 10). What would break
