@@ -56,7 +56,17 @@ def once_across_workers(tmp_path_factory, name, produce, timeout=600):
                    description=f"{name} to be made ready by another worker")
         return
 
-    produce()
+    # The lock is released if the work fails, so that a waiting worker takes it
+    # and reports its own error rather than polling for a marker that is never
+    # coming: the alternative is every other worker timing out on "to be made
+    # ready by another worker", which names neither the failure nor who hit it,
+    # and the run taking the whole timeout to say a build broke.
+    try:
+        produce()
+    except BaseException:
+        lock.unlink(missing_ok=True)
+        raise
+
     # Written only once the work is finished, so that a worker seeing it can
     # rely on the image being there.
     done.touch()
