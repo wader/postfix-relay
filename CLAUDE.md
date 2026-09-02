@@ -316,7 +316,13 @@ Notes a contributor will hit:
   current instances, and `xfail_strict` is not set in `pytest.ini`, so
   `strict=True` has to be written on each marker.
 - **Docs.** User-visible behaviour goes in `README.md`. If a change makes the
-  README wrong, the change is not finished.
+  README wrong, the change is not finished. The same holds for this file, and
+  it is the half that gets forgotten: it describes the tree, so a change to
+  `run`, `healthcheck`, the workflows or the fixtures can leave it wrong
+  without touching it. Before pushing one, grep this file for what you moved —
+  a count, a line number, an enumeration, a claim about what a script does.
+  Counts and line numbers are the first to rot, and are better replaced by
+  what they were being used to say than refreshed.
 
 ## Non-obvious invariants
 
@@ -629,7 +635,12 @@ changing any of them.
     429 rather than with the image. The first worker to create the lock does
     the work and touches a `.done` marker only after finishing; the rest wait
     on that marker. With no xdist worker in the environment it calls straight
-    through.
+    through. The `try`/`except BaseException` around the work is not defensive
+    padding: it removes the lock so a waiting worker takes it and reports its
+    own error, where leaving it makes every other worker poll the marker for
+    the full timeout and then blame "another worker" for a failure it cannot
+    name. `BaseException` and not `Exception`, so an interrupt or a timeout in
+    the work does not strand them either.
 
 30. **`POSTFIX_RELAY_IMAGE` is refused for an architecture the local daemon
     could build**, and `POSTFIX_RELAY_ARCH`, when set, must match what docker
