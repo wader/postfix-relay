@@ -556,7 +556,14 @@ changing any of them.
     *"configuration error at line N: unrecognized parameter"*. It is not the
     only name that has to stay out: any `OPENDKIM_<name>_FILE` would land there
     too, and does not only because `secretsFromFiles` unsets the `_FILE`
-    variable after reading it. That `unset` is part of this invariant.
+    variable after reading it. That `unset` is part of this invariant, and
+    `tests/test_secrets.py` now pins it: one test there asserts that a
+    `POSTFIX_<name>_FILE` leaves no `<name>_FILE` in `main.cf` and that a
+    `POSTFIXMASTER_` one draws no `postconf` fatal — the two prefixes where
+    losing the `unset` costs nothing but noise. The prefix where it costs the
+    whole file is this one, and the relay in that same file configured through
+    `OPENDKIM_DOMAINS_FILE` is what catches that: without the `unset` it does
+    not come up at all.
 
 16. **`dkimConfig` deletes `/etc/opendkim/KeyTable` and
     `/etc/opendkim/SigningTable` before rebuilding them**, because the loop
@@ -574,7 +581,7 @@ changing any of them.
     exactly five prefixes — `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`,
     `OPENDKIM_` and `POSTSRSD_`. `SASL_Passwds`, `POSTMASTER_ADDRESS` and the
     `RSYSLOG_*` variables have no `_FILE` form, and `tests/test_secrets.py`
-    names the same five.
+    exercises the same five.
 
 18. **The POSTMAP loop is wrapped in `shopt -s nullglob` / `shopt -u nullglob`,
     and chowns the table and everything `postmap` generated from it to

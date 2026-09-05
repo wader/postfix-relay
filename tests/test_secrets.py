@@ -11,12 +11,17 @@ import pytest
 from testcontainers.community.mailpit import MailpitUser
 
 from tests.helpers import (container_exec, container_log, container_stderr,
-                           exit_code_within, healthcheck_after_stopping, send)
+                           esmtp_features, exit_code_within, healthcheck_after_stopping,
+                           postconf, send)
 
 UPSTREAM = '[secrets-upstream]:1025'
 USER, PASSWORD = 'relay', 's3cret'
 SECRET = '/run/secrets/sasl_passwd'
 SASL_PASSWD = f"{UPSTREAM} {USER}:{PASSWORD}\n"
+
+HOSTNAME, HOSTNAME_SECRET = 'smtp.from-a-file.test', '/run/secrets/myhostname'
+SUBMISSION = 'submission inet n - y - - smtpd'
+SUBMISSION_SECRET = '/run/secrets/submission'
 
 
 def healthcheck(container):
@@ -43,6 +48,23 @@ def relay(postfix_factory, upstream):
             'POSTMAP_sasl_passwd_FILE': SECRET,
         },
         files={SECRET: SASL_PASSWD})
+
+
+@pytest.fixture
+def settings_from_files(postfix_shared):
+    """Relay taking a POSTFIX_ and a POSTFIXMASTER_ setting from a file.
+
+    Shared, because the three tests below only read it back. The other three
+    prefixes are configured separately elsewhere in this file: one loop reads
+    all five, but only the reading is shared -- what each of them does with the
+    value afterwards is a different piece of code every time.
+    """
+    return postfix_shared(
+        env={
+            'POSTFIX_myhostname_FILE': HOSTNAME_SECRET,
+            'POSTFIXMASTER_submission__inet_FILE': SUBMISSION_SECRET,
+        },
+        files={HOSTNAME_SECRET: f"{HOSTNAME}\n", SUBMISSION_SECRET: f"{SUBMISSION}\n"})
 
 
 def test_a_password_from_a_file_relays_through_an_authenticated_upstream(relay, upstream):
@@ -95,6 +117,43 @@ def test_a_path_that_cannot_be_read_stops_the_container(postfix_factory):
 
     assert exit_code_within(relay, seconds=30) == 1
     assert 'which cannot be read' in container_stderr(relay)
+
+
+def test_a_postfix_setting_from_a_file_is_what_the_relay_runs_with(settings_from_files):
+    assert postconf(settings_from_files, 'myhostname') == HOSTNAME
+
+    # Written into main.cf is not the same as used, and myhostname is a setting
+    # the relay answers with: the greeting is postfix's own reading of it.
+    code, banner, _ = esmtp_features(settings_from_files)
+    assert code == 220
+    assert banner.startswith(f"{HOSTNAME} ESMTP")
+
+
+def test_a_master_cf_service_from_a_file_is_added(settings_from_files):
+    """The service tests/test_config.py adds from the environment, from a file.
+
+    Deliberately the same service and the same assertion: what differs is the
+    route the value took. "__" still stands for "/", because the "_FILE" suffix
+    is stripped off the name before the replacement ever sees it.
+    """
+    assert 'submission inet' in \
+        container_exec(settings_from_files, ["postconf", "-M", "submission/inet"])
+
+
+def test_the_file_variable_itself_configures_nothing(settings_from_files):
+    """The unset that ends secretsFromFiles, part of CLAUDE.md invariant 15.
+
+    Without it every loop below configures "<name>_FILE" as well, and neither
+    of these two stops the container: postfix takes myhostname_FILE into
+    main.cf and mentions it in a warning, and "postconf -Me" refuses
+    submission/inet_FILE with a fatal the script does not see. The prefix that
+    pays for it is OPENDKIM_, where one name opendkim does not know costs the
+    whole configuration file -- the relay below does not come up at all
+    without this unset, which is a loud failure but not one that names it.
+    """
+    assert 'myhostname_FILE' not in \
+        container_exec(settings_from_files, ["cat", "/etc/postfix/main.cf"])
+    assert 'submission/inet_FILE' not in container_stderr(settings_from_files)
 
 
 def test_a_domain_list_from_a_file_is_watched_by_the_health_check(postfix_factory):
