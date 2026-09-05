@@ -334,9 +334,41 @@ jobs:
         # architectures and the same provenance attestations under it. Verified
         # with "--dry-run" against the published image, which returned the index
         # entry for entry.
+        #
+        # The stand-down above that command keeps latest following master rather
+        # than following whichever run finished last. Master runs overlap on
+        # purpose -- the concurrency block at the top of this file does not
+        # cancel them, because a cancelled master run is one that never
+        # published -- so an older run can arrive here after a newer one has
+        # already moved the tag, and moving it back would leave users pulling
+        # the older image until the next push, which on this repository can be
+        # days. The remote is asked rather than the checkout, because the
+        # question is what master points at now and not what it pointed at when
+        # this run started; "git ls-remote" needs no working tree, which is why
+        # this job can keep having no checkout step, and GIT_TERMINAL_PROMPT
+        # turns a repository git cannot reach into an immediate failure rather
+        # than a credential prompt nobody is there to answer. An unreadable
+        # answer stops the job instead of standing down, so that a tag which
+        # did not move is never mistaken for a tag that was not supposed to.
+        # (issue #306)
         run: |
+          head=$(git ls-remote "${SERVER}/${REPOSITORY}" refs/heads/master | cut -f1)
+          if [ -z "${head}" ] ; then
+            echo "could not read what master points at" >&2
+            exit 1
+          fi
+          if [ "${head}" != "${SHA}" ] ; then
+            echo "superseded: master is at ${head}, this run built ${SHA}."
+            echo "Leaving latest where the newer run put it."
+            exit 0
+          fi
+
           docker buildx imagetools create -t "${REPO}:latest" "${REPO}@${DIGEST}"
           echo "latest -> ${DIGEST}"
         env:
           REPO: "${{ steps.reponame.outputs.DOCKER_REPO }}"
           DIGEST: "${{ needs.docker.outputs.digest }}"
+          SERVER: "${{ github.server_url }}"
+          REPOSITORY: "${{ github.repository }}"
+          SHA: "${{ github.sha }}"
+          GIT_TERMINAL_PROMPT: "0"
