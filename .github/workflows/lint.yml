@@ -12,8 +12,8 @@ concurrency:
 
 # What the ShellCheck gate is, and what it deliberately is not.
 #
-# It runs shellcheck at "-S error", which is the threshold the two scripts pass
-# today and the only one that does: "-S warning" fails on the SC2034 in
+# It runs shellcheck at "-S error", which is the threshold the image scripts
+# pass today and the only one that does: "-S warning" fails on the SC2034 in
 # awaitGreeting, and the default threshold fails on that plus eight notes,
 # two of which are deliberate and must not be "fixed" -- that SC2034 is a retry
 # counter the loop body has no reason to read, and the SC2086 in healthcheck is
@@ -58,13 +58,18 @@ jobs:
             --strip-components=1 -C "${RUNNER_TEMP}/shellcheck"
           echo "${RUNNER_TEMP}/shellcheck" >> "${GITHUB_PATH}"
 
-      - name: Check run and healthcheck
-        # The only two shell scripts in the tree. Both carry a #!/bin/bash
-        # shebang, which is where shellcheck reads the dialect from, so there
-        # is no -s to pass.
+      - name: Check the shell scripts
+        # Every shell script in the tree. run and healthcheck are what goes
+        # into the image; the hook is what stands a Claude Code on the web
+        # session up, so when it breaks it breaks these gates rather than the
+        # image -- and it breaks them quietly, since it deliberately exits 0
+        # whatever happens and reports only on stderr. It passes at the stock
+        # threshold as well as this one, so gating it can only ever go red on
+        # a future edit to it. All three carry a #!/bin/bash shebang, which is
+        # where shellcheck reads the dialect from, so there is no -s to pass.
         run: |
           shellcheck --version
-          shellcheck -S error run healthcheck
+          shellcheck -S error run healthcheck .claude/hooks/session-start.sh
 
   # What the Ruff gate is, and what it deliberately is not.
   #
@@ -116,7 +121,7 @@ jobs:
 
       - name: Check tests
         # tests/ is where all the python is, and naming it keeps this gate as
-        # narrow as the one above, which names its two scripts rather than
+        # narrow as the one above, which names its scripts rather than
         # scanning the tree.
         run: |
           ruff --version
