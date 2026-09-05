@@ -800,6 +800,17 @@ POSTFIX_RELAY_IMAGE=postfix-relay:test-armv7 POSTFIX_RELAY_ARCH=arm \
   pytest -m smoke -n0
 ```
 
+`POSTFIX_RELAY_IMAGE_PUBLISHED=1` is the one other way past that refusal. It
+says the image named is the one that was published rather than a build of the
+tree, which is the only case where an image of this machine's own architecture
+is worth running the tests against instead of the tree:
+
+```bash
+docker pull mwader/postfix-relay:latest
+POSTFIX_RELAY_IMAGE=mwader/postfix-relay:latest POSTFIX_RELAY_IMAGE_PUBLISHED=1 \
+  POSTFIX_RELAY_ARCH=amd64 pytest -m smoke
+```
+
 CI runs the whole suite on `amd64` and on `arm64`, both natively. There is no
 `arm/v7` runner, so that image is emulated and only the handful of tests
 marked `smoke` run against it -- it starts, reports healthy, relays a message,
@@ -807,6 +818,14 @@ and has no `postsrsd` -- on `master`, on a manual run, or on a pull request
 labelled `test-emulated` before its next push. Emulation is slow enough that
 the rest is not worth its minutes, and every wait in the suite is measured
 against a native run.
+
+All of that tests an image built from the tree. Every push to `master` also
+publishes `latest`, and what reaches the registry is built by buildx rather
+than by the daemon the suite uses, so a check after the push pulls that tag on
+`amd64` and on `arm64` -- the way anyone else pulls it -- and runs the same
+smoke tests against it. It is the only check that looks at the image users
+actually pull. Nothing is rolled back when it fails: the tag is out by then,
+and the check is what says so.
 
 | File | What it covers |
 | --- | --- |

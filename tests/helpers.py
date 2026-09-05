@@ -223,6 +223,23 @@ def wait_for_log(container, text, timeout=DEFAULT_TIMEOUT):
                       timeout=timeout, description=f"{text!r} in the container log")
 
 
+def wait_for_log_line(container, text, timeout=DEFAULT_TIMEOUT):
+    """Wait for a line in the container log and return that line.
+
+    wait_for_log hands back the whole log, which on a shared relay is where
+    every other test's deliveries are written too: a second assertion made
+    against that string holds for any message rather than for this one.
+    Returning the line is what makes two things asserted about a delivery
+    have to be true of the same delivery.
+    """
+    def line():
+        return next((entry for entry in container_log(container).splitlines()
+                     if text in entry), None)
+
+    return poll_until(line, timeout=timeout,
+                      description=f"{text!r} on a line in the container log")
+
+
 def wait_for_file(container, path, text, timeout=DEFAULT_TIMEOUT):
     """Wait for a file in the container to contain text and return it."""
     def content():

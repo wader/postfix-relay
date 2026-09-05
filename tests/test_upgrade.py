@@ -26,7 +26,7 @@ from tests.helpers import (container_exec, container_log, dkim_dns_record, image
 SRS_DOMAIN = 'srs.example.com'
 
 
-def test_the_queue_the_older_image_left_is_delivered_by_this_one(published_image,
+def test_the_queue_the_older_image_left_is_delivered_by_this_one(upgrade_from_image,
                                                                  docker_volume,
                                                                  postfix_factory,
                                                                  mailpit_factory):
@@ -39,7 +39,7 @@ def test_the_queue_the_older_image_left_is_delivered_by_this_one(published_image
     env = {'POSTFIX_relayhost': 'upgrade-target:1025'}
     volumes = {docker_volume: '/var/spool/postfix'}
 
-    older = postfix_factory(image=published_image, env=env, volumes=volumes)
+    older = postfix_factory(image=upgrade_from_image, env=env, volumes=volumes)
     send(older, subject='queued before the upgrade')
     wait_for_log(older, 'status=deferred')
     older.get_wrapped_container().stop()
@@ -54,7 +54,7 @@ def test_the_queue_the_older_image_left_is_delivered_by_this_one(published_image
     assert target.wait_for_message('queued before the upgrade')
 
 
-def test_the_key_the_older_image_generated_still_signs(published_image, docker_volume,
+def test_the_key_the_older_image_generated_still_signs(upgrade_from_image, docker_volume,
                                                        postfix_factory, mailpit):
     """The published DNS record has to stay valid across an upgrade.
 
@@ -66,7 +66,7 @@ def test_the_key_the_older_image_generated_still_signs(published_image, docker_v
     env = {'OPENDKIM_DOMAINS': 'example.com=sel1'}
     volumes = {docker_volume: '/etc/opendkim/keys'}
 
-    older = postfix_factory(image=published_image, env=env, volumes=volumes)
+    older = postfix_factory(image=upgrade_from_image, env=env, volumes=volumes)
     published = dkim_dns_record(older, 'example.com', 'sel1')
     older.get_wrapped_container().stop()
 
@@ -82,7 +82,7 @@ def test_the_key_the_older_image_generated_still_signs(published_image, docker_v
 
 
 @pytest.fixture
-def older_image_that_rewrites(published_image):
+def older_image_that_rewrites(upgrade_from_image):
     """The released image, or a skip while it is older than SRS itself.
 
     SRS was added after the release tests/upgrade-from.Dockerfile names, so
@@ -92,13 +92,13 @@ def older_image_that_rewrites(published_image):
     running of its own accord the first time the anchor moves to a release
     that has the feature.
     """
-    knows_srs = image_run(published_image, [
+    knows_srs = image_run(upgrade_from_image, [
         "bash", "-c", "grep -q POSTSRSD_ /root/run && echo yes || echo no"])
 
     if 'yes' not in knows_srs:
-        pytest.skip(f"{published_image} has no SRS, so it left no secret to reuse")
+        pytest.skip(f"{upgrade_from_image} has no SRS, so it left no secret to reuse")
 
-    return published_image
+    return upgrade_from_image
 
 
 def test_addresses_the_older_image_rewrote_still_reverse(older_image_that_rewrites,
