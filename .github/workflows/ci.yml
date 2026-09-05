@@ -395,23 +395,29 @@ jobs:
         # anything ever again -- the one outcome worse than promoting the wrong
         # image. (issue #306)
         run: |
-          head=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/master | cut -f1)
+          head=$(git ls-remote "${SERVER}/${REPOSITORY}" refs/heads/master | cut -f1)
           if [ -z "${head}" ] ; then
             echo "::error::could not read what master points at"
             exit 1
           fi
           echo "head=${head}" >> "${GITHUB_OUTPUT}"
-          if [ "${head}" != "${{ github.sha }}" ] ; then
-            echo "::notice::${{ github.sha }} is no longer master's head (${head}); leaving latest to that run"
+          if [ "${head}" != "${SHA}" ] ; then
+            echo "::notice::${SHA} is no longer master's head (${head}); leaving latest to that run"
           fi
         env:
-          # The other half of the emptiness check above, for the case where the
-          # command returns nothing at all rather than an empty string: git
-          # answers a repository it cannot reach by asking for credentials, and
-          # nobody is here to type them. Without this the job sits on that
-          # prompt until the job timeout above expires, long after the answer
-          # was known to be unavailable; with it, git fails at once and the
-          # check exits 1 as it means to.
+          # Where this is running is in the context; writing the host out is one
+          # more line that has to be edited if it ever stops being github.com.
+          SERVER: "${{ github.server_url }}"
+          REPOSITORY: "${{ github.repository }}"
+          SHA: "${{ github.sha }}"
+          # Belt and braces on the emptiness check above: git answers a
+          # repository it cannot reach by asking for credentials, and this says
+          # there is nobody to ask. It pins what already happens rather than
+          # creating it -- measured with no terminal attached, which is what a
+          # runner is, git gives up in about a second on its own: "could not
+          # read Username ... No such device or address", exit 128. What it
+          # buys is holding that if a terminal or an askpass helper is ever
+          # there to answer.
           GIT_TERMINAL_PROMPT: "0"
       -
         name: Login to DockerHub
