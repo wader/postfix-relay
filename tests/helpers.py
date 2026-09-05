@@ -3,6 +3,7 @@ import re
 import smtplib
 import time
 
+import dkim
 import docker
 import requests
 
@@ -197,6 +198,16 @@ def dkim_dns_record(container, domain, selector):
     return "".join(re.findall(r'"([^"]*)"', text))
 
 
+def verifies(raw, record):
+    """Whether a signed message validates against the record it points at.
+
+    The public key is handed to the verifier directly instead of being looked
+    up: there is no DNS in the test network, and what has to be checked is that
+    the signature matches the record the container tells the user to publish.
+    """
+    return dkim.verify(raw, dnsfunc=lambda name, **kwargs: record.encode())
+
+
 def container_log(container):
     return container.get_logs()[0].decode()
 
@@ -210,6 +221,23 @@ def wait_for_log(container, text, timeout=DEFAULT_TIMEOUT):
     """Wait for a line in the container log and return the whole log."""
     return poll_until(lambda: text in container_log(container) and container_log(container),
                       timeout=timeout, description=f"{text!r} in the container log")
+
+
+def wait_for_log_line(container, text, timeout=DEFAULT_TIMEOUT):
+    """Wait for a line in the container log and return that line.
+
+    wait_for_log hands back the whole log, which on a shared relay is where
+    every other test's deliveries are written too: a second assertion made
+    against that string holds for any message rather than for this one.
+    Returning the line is what makes two things asserted about a delivery
+    have to be true of the same delivery.
+    """
+    def line():
+        return next((entry for entry in container_log(container).splitlines()
+                     if text in entry), None)
+
+    return poll_until(line, timeout=timeout,
+                      description=f"{text!r} on a line in the container log")
 
 
 def wait_for_file(container, path, text, timeout=DEFAULT_TIMEOUT):

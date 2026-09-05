@@ -606,8 +606,8 @@ will list findings the daily job deliberately ignores, because Debian has
 assessed them as not warranting a stable update and no rebuild here can clear
 them. The largest single group of those is `perl`, which is present only so
 that [`qshape`](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)
-keeps working and which a relaying container never runs. What actually handles mail —
-postfix, the TLS library, the SASL stack — is a much smaller surface, and
+keeps working and which a relaying container never runs. What actually handles
+mail — postfix, the TLS library, the SASL stack — is a much smaller surface, and
 [What runs as root](#what-runs-as-root-and-what-to-take-away) is where to look
 next if you want to shrink it.
 
@@ -771,6 +771,13 @@ that file is never built, it exists so that Dependabot can offer a bump to a
 version the tests otherwise name only in Python, and `tests/fixtures/mailpit.py`
 reads the tag back out of it.
 
+The upgrade tests pull one more image: the last released `mwader/postfix-relay`,
+which they start first so that the state it leaves behind is read back by the
+image built from the tree rather than by another container of the same build.
+Its version is pinned in `tests/upgrade-from.Dockerfile`, the same way and for
+the same reason as mailpit's. A release rather than `latest`, because `latest`
+is rebuilt from `master` on every merge and would be the image under test.
+
 ```bash
 # Create and enable python virtual environment
 python -m venv venv
@@ -817,13 +824,31 @@ POSTFIX_RELAY_IMAGE=postfix-relay:test-armv7 POSTFIX_RELAY_ARCH=arm \
   pytest -m smoke -n0
 ```
 
+`POSTFIX_RELAY_IMAGE_PUBLISHED=1` is the one other way past that refusal. It
+says the image named is the one that was published rather than a build of the
+tree, which is the only case where an image of this machine's own architecture
+is worth running the tests against instead of the tree:
+
+```bash
+docker pull mwader/postfix-relay:latest
+POSTFIX_RELAY_IMAGE=mwader/postfix-relay:latest POSTFIX_RELAY_IMAGE_PUBLISHED=1 \
+  POSTFIX_RELAY_ARCH=amd64 pytest -m smoke
+```
+
 CI runs the whole suite on `amd64` and on `arm64`, both natively. There is no
 `arm/v7` runner, so that image is emulated and only the handful of tests
 marked `smoke` run against it -- it starts, reports healthy, relays a message,
-and has no `postsrsd` -- on `master`, on a manual run, or on a pull request
-labelled `test-emulated` before its next push. Emulation is slow enough that
-the rest is not worth its minutes, and every wait in the suite is measured
-against a native run.
+and has no `postsrsd`. That runs on every pull request, like the two native
+runs. Emulation is slow enough that the rest is not worth its minutes, and
+every wait in the suite is measured against a native run.
+
+All of that tests an image built from the tree. Every push to `master` also
+publishes `latest`, and what reaches the registry is built by buildx rather
+than by the daemon the suite uses, so a check after the push pulls that tag on
+`amd64` and on `arm64` -- the way anyone else pulls it -- and runs the same
+smoke tests against it. It is the only check that looks at the image users
+actually pull. Nothing is rolled back when it fails: the tag is out by then,
+and the check is what says so.
 
 | File | What it covers |
 | --- | --- |
@@ -843,6 +868,7 @@ against a native run.
 | `test_capabilities.py` | Relaying with everything docker grants by default taken away but the documented set |
 | `test_secrets.py` | Configuration read from a file instead of the environment, and what the health check still expects |
 | `test_qshape.py` | The queue tool the troubleshooting section has users run |
+| `test_upgrade.py` | Starting on the state the last released image wrote, which is what the "Upgrading" section promises |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and

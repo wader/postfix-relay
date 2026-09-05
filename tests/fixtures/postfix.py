@@ -20,10 +20,11 @@ IMAGE_TAG = "postfix-relay:test"
 # which is every run on the machine it is meant for, the suite builds the image
 # as it always has.
 #
-# Only accepted for an architecture this machine cannot build, which is the
-# whole of the case for having it. Building from the Dockerfile is what makes
-# the suite test the tree it is run in rather than whatever was left in the
-# image store, and that is not worth giving up anywhere it can still be done.
+# Only accepted for an architecture this machine cannot build, or for the image
+# that was published (see below): between them that is the whole of the case for
+# having it. Building from the Dockerfile is what makes the suite test the tree
+# it is run in rather than whatever was left in the image store, and that is not
+# worth giving up anywhere it can still be done.
 PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
 
 # What that image has to be, as docker reports it: "arm" for the arm/v7 image,
@@ -31,6 +32,39 @@ PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
 # and got the runner's own would pass every test it ran and say nothing, which
 # is the one way an emulated run can be worse than no run at all.
 EXPECTED_ARCHITECTURE = os.environ.get('POSTFIX_RELAY_ARCH')
+
+# The other image the suite cannot build for itself: the one buildx pushed to
+# the registry, which is what a user pulls and the only thing no check here
+# looks at otherwise. It is the architecture of the runner that pulls it, so
+# the refusal below would turn it down for looking like a stale local build.
+# This is how a caller says it is not one, and it is the only thing that lifts
+# that refusal: a run that names a leftover image by accident still gets it.
+PUBLISHED_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE_PUBLISHED')
+
+
+def _upgrade_from_image():
+    """The released image an upgrade starts from, read from the anchor file.
+
+    tests/upgrade-from.Dockerfile names it where Dependabot looks and says why
+    it is a release rather than "latest"; this reads the tag back out, so the
+    version is written once and a bump is one line in one file.
+
+    A missing or unparseable anchor raises, for the reason the mailpit one
+    does: a fallback written here would be a constant that works and that
+    nothing updates.
+    """
+    anchor = os.path.join(os.path.dirname(__file__), os.pardir, 'upgrade-from.Dockerfile')
+
+    with open(anchor, encoding='utf-8') as lines:
+        for line in lines:
+            if line.startswith('FROM '):
+                return line[len('FROM '):].strip()
+
+    raise RuntimeError(f"no FROM line to read the upgrade-from image from in {anchor}")
+
+
+UPGRADE_FROM_IMAGE = _upgrade_from_image()
+
 
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
@@ -41,19 +75,22 @@ def postfix_image(tmp_path_factory):
     """The image under test, built once for the whole run.
 
     Every test reaches the image through here, so pointing this at a prebuilt
-    one is enough to run the suite against an image the suite did not build.
+    one is enough to run the suite against an image the suite did not build --
+    a foreign architecture, or the image that was published.
     """
     if PREBUILT_IMAGE:
         client = docker.from_env()
         image = client.images.get(PREBUILT_IMAGE)
         architecture = image.attrs['Architecture']
 
-        if architecture == client.version()['Arch']:
+        if not PUBLISHED_IMAGE and architecture == client.version()['Arch']:
             raise AssertionError(
                 f"POSTFIX_RELAY_IMAGE names a {architecture} image, which this "
                 "machine can build: the suite builds from the Dockerfile so "
                 "that what it tests is what is in the tree. It takes a "
-                "prebuilt image only where the docker builder cannot make one.")
+                "prebuilt image only where the docker builder cannot make one, "
+                "or where POSTFIX_RELAY_IMAGE_PUBLISHED says the image named is "
+                "the one that was published rather than a build of the tree.")
 
         if EXPECTED_ARCHITECTURE and architecture != EXPECTED_ARCHITECTURE:
             raise AssertionError(
@@ -67,6 +104,56 @@ def postfix_image(tmp_path_factory):
         lambda: DockerImage(path=ROOT_PATH, tag=IMAGE_TAG).build())
 
     return IMAGE_TAG
+
+
+def _platform(image):
+    """The platform of a local image, spelled the way a pull takes one."""
+    attrs = docker.from_env().images.get(image).attrs
+    parts = [attrs['Os'], attrs['Architecture']]
+    if attrs.get('Variant'):
+        parts.append(attrs['Variant'])
+    return '/'.join(parts)
+
+
+def _pull_upgrade_from(platform):
+    """Fetch the released image for a platform, unless it is already here.
+
+    The same trade as the mailpit fixture makes: the tag names an exact
+    version, so an image that is here is the image a pull would bring, and
+    asking again spends one of the hundred anonymous pulls Docker Hub allows
+    per six hours for nothing. The platform is compared as well as the name,
+    because the copy an earlier run left behind may be this machine's own
+    rather than the one being asked for.
+    """
+    try:
+        if _platform(UPGRADE_FROM_IMAGE) == platform:
+            return
+    except docker.errors.ImageNotFound:
+        pass
+
+    docker.from_env().images.pull(UPGRADE_FROM_IMAGE, platform=platform)
+
+
+@pytest.fixture(scope="session")
+def upgrade_from_image(postfix_image, tmp_path_factory):
+    """The last released image, fetched once for the whole run.
+
+    Named for tests/upgrade-from.Dockerfile, which holds the version, and not
+    to be read as the PUBLISHED_IMAGE above: that one is a flag saying the
+    image under test came from the registry, this one is the older release the
+    upgrade tests start from.
+
+    Pulled for the platform of the image under test rather than for the
+    machine's. Whenever POSTFIX_RELAY_IMAGE names an image this run did not
+    build, the machine's own would put the upgrade between two architectures
+    and pass either way, which is the silence POSTFIX_RELAY_ARCH exists to stop.
+    """
+    platform = _platform(postfix_image)
+
+    once_across_workers(tmp_path_factory, "upgrade-from-image",
+                        lambda: _pull_upgrade_from(platform))
+
+    return UPGRADE_FROM_IMAGE
 
 
 def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
@@ -138,13 +225,15 @@ def postfix_factory(postfix_image, shared_network, request):
     "command" replaces the image's own, for the few tests that have to stand
     the image up differently from the way it ships. "wait_ready" can be turned
     off for containers that are not expected to come up at all, and "kwargs" is
-    passed to docker as is.
+    passed to docker as is. "image" stands up another image than the one under
+    test, which only the upgrade tests want: they write the state with the
+    released image before the one built from the tree reads it.
     """
     started = []
 
     def start(env=None, files=None, volumes=None, ports=(25,), alias=None, command=None,
-              wait_ready=True, kwargs=None):
-        return _start(postfix_image, shared_network, env=env, files=files,
+              wait_ready=True, kwargs=None, image=None):
+        return _start(image or postfix_image, shared_network, env=env, files=files,
                       volumes=volumes, ports=ports, alias=alias, command=command,
                       wait_ready=wait_ready, kwargs=kwargs, register=started.append)
 
