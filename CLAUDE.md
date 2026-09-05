@@ -237,7 +237,7 @@ shellcheck is a deliberate edit, the way a base-image suite change is.
 Four workflow files carry a `pull_request` trigger, but `dependabot-auto-merge.yml`
 is a no-op for anything not opened by `dependabot[bot]` — its single job has no
 display `name:`, so on an ordinary pull request it appears as a skipped
-`auto-merge` check. The seven that can actually fail are:
+`auto-merge` check. The ones that can actually fail are:
 
 | Check | From | What it does |
 | --- | --- | --- |
@@ -270,8 +270,8 @@ Notes a contributor will hit:
   job means editing that file in the same commit — no check catches that drift,
   and a required context naming a job that no longer reports blocks every pull
   request until someone with admin rights notices.
-- **Three of the seven checks are deliberately not required**, and the reasons
-  are the point of writing the list down. **Test Results** is published by
+- **Every check that is not on that list is off it for a reason**, and the
+  reasons are the point of writing the list down. **Test Results** is published by
   `test-results.yml` on a `workflow_run` whose job carries
   `if: conclusion == 'success' || conclusion == 'failure'`, and `test.yml`
   cancels in-flight runs on every ref but `master` — so a push that supersedes a
@@ -283,7 +283,10 @@ Notes a contributor will hit:
   request since #273, and is still not required: its verdict comes from an
   emulator, where a QEMU artefact reads like a real failure, so it reports and a
   person looks rather than blocking a merge. Requiring it is a separate decision,
-  and `.github/rulesets/master.json` is where it would be recorded.
+  and `.github/rulesets/master.json` is where it would be recorded. And the two
+  **Verify Published Image** jobs have nothing to report on a branch at all:
+  what they check is the image a push to `master` published, so on a pull
+  request they are skipped by the `if:` that keeps them off it.
 - **The ruleset carries that one rule and no bypass actors.**
   `strict_required_status_checks_policy` is false, so a branch does not have to
   be brought up to date with `master` before it merges — with dependabot
@@ -553,7 +556,14 @@ changing any of them.
     *"configuration error at line N: unrecognized parameter"*. It is not the
     only name that has to stay out: any `OPENDKIM_<name>_FILE` would land there
     too, and does not only because `secretsFromFiles` unsets the `_FILE`
-    variable after reading it. That `unset` is part of this invariant.
+    variable after reading it. That `unset` is part of this invariant, and
+    `tests/test_secrets.py` now pins it: one test there asserts that a
+    `POSTFIX_<name>_FILE` leaves no `<name>_FILE` in `main.cf` and that a
+    `POSTFIXMASTER_` one draws no `postconf` fatal — the two prefixes where
+    losing the `unset` costs nothing but noise. The prefix where it costs the
+    whole file is this one, and the relay in that same file configured through
+    `OPENDKIM_DOMAINS_FILE` is what catches that: without the `unset` it does
+    not come up at all.
 
 16. **`dkimConfig` deletes `/etc/opendkim/KeyTable` and
     `/etc/opendkim/SigningTable` before rebuilding them**, because the loop
@@ -571,7 +581,7 @@ changing any of them.
     exactly five prefixes — `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`,
     `OPENDKIM_` and `POSTSRSD_`. `SASL_Passwds`, `POSTMASTER_ADDRESS` and the
     `RSYSLOG_*` variables have no `_FILE` form, and `tests/test_secrets.py`
-    names the same five.
+    exercises the same five.
 
 18. **The POSTMAP loop is wrapped in `shopt -s nullglob` / `shopt -u nullglob`,
     and chowns the table and everything `postmap` generated from it to
