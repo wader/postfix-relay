@@ -3,7 +3,8 @@
 Pulling a newer image replaces the whole filesystem, so what an upgrade
 actually asks is whether the state left behind is still readable: the queue
 and the DKIM keys in the two volumes, and the SRS secret in the file the
-README says to mount. The Upgrading section promises all three survive.
+README says to mount. The Upgrading section promises the two volumes survive;
+the SRS section promises the same of the secret, to whoever mounted it.
 
 Everywhere else in the suite the container that writes that state and the one
 that reads it are the same build, which is a restart rather than an upgrade
@@ -91,12 +92,19 @@ def older_image_that_rewrites(upgrade_from_image):
     image rather than written as a version to compare against: it starts
     running of its own accord the first time the anchor moves to a release
     that has the feature.
-    """
-    knows_srs = image_run(upgrade_from_image, [
-        "bash", "-c", "grep -q POSTSRSD_ /root/run && echo yes || echo no"])
 
-    if 'yes' not in knows_srs:
-        pytest.skip(f"{upgrade_from_image} has no SRS, so it left no secret to reuse")
+    The question is whether the image can rewrite, so it is put to the binary
+    and not to the entrypoint's text. "run" names POSTSRSD_ on every
+    architecture, armhf included, where the branch that names it is the one
+    refusing to start because Debian builds no postsrsd there -- so grepping
+    the script would answer "yes" for the one image that most certainly wrote
+    no secret. "command -v postsrsd" is the same question "run" itself asks.
+    """
+    rewrites = image_run(upgrade_from_image, [
+        "bash", "-c", "command -v postsrsd > /dev/null && echo yes || echo no"])
+
+    if 'yes' not in rewrites:
+        pytest.skip(f"{upgrade_from_image} has no postsrsd, so it left no secret to reuse")
 
     return upgrade_from_image
 

@@ -46,7 +46,7 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
+| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error run healthcheck` — the only threshold the two scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
@@ -292,8 +292,10 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 request: they are `needs: docker` and `master` only, because what they check is
 the publication **Build Image** makes there. Each pulls that image from the
 registry the way a user would and runs `pytest -m smoke` against it — the only
-checks in the tree that look at the artefact on the registry rather than at one
-built from the tree. (issue #266) They pull it by *digest*, not by tag, and
+checks that look at what a push to `master` published rather than at an image
+built from the tree. They are not alone in reaching the registry:
+`tests/test_upgrade.py` pulls a *released* tag, which is a different question
+(see 33). (issue #266) They pull it by *digest*, not by tag, and
 that is the whole of the arrangement below: what the build pushes is reachable
 under `sha-<commit>` and its digest, `latest` is not written by the build at
 all, and **Publish latest** — a fourth job, `needs` on all three — moves the
@@ -822,10 +824,12 @@ changing any of them.
     edited, and it is what deployments actually run. The cost is that it lags
     the tree by whatever has been merged since: SRS landed after 1.2.17, so
     the released image never wrote a secret, and the SRS test skips itself
-    saying so instead of passing. It decides that by reading the released
-    image's own `run` for `POSTSRSD_`, not by comparing version numbers, so it
-    starts running of its own accord the first time the anchor moves past the
-    release that adds the feature. And `upgrade_from_image` pulls for the
+    saying so instead of passing. It decides that by asking the released image
+    for a `postsrsd` binary, not by comparing version numbers, so it starts
+    running of its own accord the first time the anchor moves past the release
+    that adds the feature. The binary and not `POSTSRSD_` in its `run`: that
+    string is in the script on every architecture, and on armhf the branch
+    holding it is the one refusing to start for want of the package. And `upgrade_from_image` pulls for the
     platform of the image under test rather than the machine's: wherever
     `POSTFIX_RELAY_IMAGE` names an image this run did not build — a foreign
     architecture, or the published one 30 now also admits — the machine's own
