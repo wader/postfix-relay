@@ -245,25 +245,20 @@ shellcheck is a deliberate edit, the way a base-image suite change is.
 Four workflow files carry a `pull_request` trigger, but `dependabot-auto-merge.yml`
 is a no-op for anything not opened by `dependabot[bot]` — its single job has no
 display `name:`, so on an ordinary pull request it appears as a skipped
-`auto-merge` check. The six that can actually fail are:
+`auto-merge` check. The ones that can actually fail are:
 
 | Check | From | What it does |
 | --- | --- | --- |
 | **Build Image** | `ci.yml` | buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`. Nothing is pushed on a PR — the DockerHub login is skipped, and the build step sets `push: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}` — but the build has to succeed on **all three** architectures. The `dependabot[bot]` half of that condition covers the branch push Dependabot makes before opening its pull request: such a run reads Dependabot secrets only, so the Actions secrets the login needs arrive empty. This is the gate that catches architecture-specific packaging problems. |
 | **Pytest** | `test.yml` | `ubuntu-latest`, Python 3.13, `pip install -r tests/requirements.txt`, `pytest --junitxml=junit/test-results.xml`. |
 | **Pytest (arm64)** | `test.yml` | The same, natively, on `ubuntu-24.04-arm`. |
+| **Pytest (arm/v7, emulated)** | `test.yml` | Pins the QEMU binfmt image, builds `linux/arm/v7` and runs `pytest -m smoke -n0` against it — four tests, and the only ones that ever start the image whose packaging differs. It ran on `master` and behind a `test-emulated` label until #273; the label is gone, and 42-152s against 174-275s for either native job is why it can be on the path a pull request waits on without lengthening it. |
 | **Event File** | `test.yml` | Uploads the triggering event payload for the reporter. |
 | **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error run healthcheck`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
-**Pytest (arm/v7, emulated)** runs only on `master`, on a manual
-dispatch, or on a pull request labelled `test-emulated` — and the label is read
-from the event that started the run, so it takes effect on the *next* push to
-the branch. It pins the QEMU binfmt image, builds `linux/arm/v7`, and runs
-`pytest -m smoke -n0`.
-
-**Verify Published Image (amd64)** and **(arm64)** do not run on a pull request
-either: they are `needs: docker` and `master` only, because what they check is
+**Verify Published Image (amd64)** and **(arm64)** do not run on a pull
+request: they are `needs: docker` and `master` only, because what they check is
 the publication the **Build Image** step makes there. Each pulls that tag the
 way a user would and runs `pytest -m smoke` against it — the only check in the
 tree that looks at the artefact on the registry rather than at one built from
@@ -292,9 +287,11 @@ Notes a contributor will hit:
   check. A check that can pass by not running is the false assurance this list
   exists to remove, and its verdict is derived anyway: it republishes the junit
   files **Pytest** already failed on. **Event File** uploads an artifact and
-  reaches no verdict at all. **Pytest (arm/v7, emulated)** does not run on a
-  pull request unless it is labelled `test-emulated`, which nearly none are; the
-  header comment in `dependabot-auto-merge.yml` ruled it out first. And the two
+  reaches no verdict at all. **Pytest (arm/v7, emulated)** runs on every pull
+  request since #273, and is still not required: its verdict comes from an
+  emulator, where a QEMU artefact reads like a real failure, so it reports and a
+  person looks rather than blocking a merge. Requiring it is a separate decision,
+  and `.github/rulesets/master.json` is where it would be recorded. And the two
   **Verify Published Image** jobs have nothing to report on a branch at all:
   what they check is the image a push to `master` published, so on a pull
   request they are skipped by the `if:` that keeps them off it.
