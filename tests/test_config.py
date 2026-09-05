@@ -9,8 +9,8 @@ import smtplib
 
 import pytest
 
-from tests.helpers import (container_exec, esmtp_features, listening_ports, postconf,
-                           send, smtp_connect, wait_for_log)
+from tests.helpers import (container_exec, container_log, esmtp_features,
+                           listening_ports, postconf, send, smtp_connect, wait_for_log)
 
 
 def test_postfix_variables_configure_main_cf(postfix_factory, mailpit):
@@ -65,6 +65,36 @@ def test_postfixmaster_variables_configure_master_cf(postfix_factory, mailpit):
     send(relay, port=587, subject='through submission')
 
     assert mailpit.wait_for_message('through submission')
+
+
+def test_postfixmaster_variables_leave_nothing_in_main_cf(postfix_factory):
+    """The two loops in "run" are two only because "${!POSTFIX_*}" keeps its
+    trailing underscore.
+
+    Bash matches variable names by literal prefix, so POSTFIX_ demands "_"
+    where POSTFIXMASTER_ has "M". Drop that one character -- the sort of edit
+    a tidy-up makes -- and every POSTFIXMASTER_ variable goes to "postconf -e"
+    as well, landing the master.cf entry's value in main.cf under a mangled
+    name while the service is still added correctly and the relay still comes
+    up healthy. Measured on the built image with "run" mounted that way:
+    "ASTER_submission__inet = submission inet n - y - - smtpd" in main.cf, one
+    postconf warning, and every other assertion in this file still passing.
+
+    What makes it worth an assertion rather than a comment is where the value
+    lands: a POSTFIXMASTER_<name>_FILE secret is resolved before these loops
+    (invariant 17), so the same edit would write a resolved credential into
+    main.cf. (issue #314)
+    """
+    relay = postfix_factory(
+        env={'POSTFIXMASTER_submission__inet': 'submission inet n - y - - smtpd'},
+        ports=(25, 587),
+    )
+
+    main_cf = container_exec(relay, ["cat", "/etc/postfix/main.cf"])
+
+    assert 'submission__inet' not in main_cf, (
+        "a POSTFIXMASTER_ variable reached main.cf: the POSTFIX_ loop matched it too")
+    assert 'unused parameter' not in container_log(relay)
 
 
 def test_postmap_variables_create_indexed_tables(postfix_factory, mailpit):
