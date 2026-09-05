@@ -5,8 +5,7 @@ on:
     branches:
       - 'master'
   pull_request:
-  # So the workflow can be asked for on a branch with no pull request open,
-  # which is the only way left to reach the emulated job without one.
+  # So the workflow can be asked for on a branch with no pull request open.
   workflow_dispatch:
 
 concurrency:
@@ -14,10 +13,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 # The three jobs that run pytest are spelled out rather than written as one
-# matrix. They differ in runner, in what they run and in when they run, so a
-# matrix would carry more exceptions than shared lines, and the job names are
-# what the required status checks and the Dependabot auto-merge workflow match
-# on: worth having in front of you. See the comment in dependabot-auto-merge.yml.
+# matrix. They differ in runner and in what they run, so a matrix would carry
+# more exceptions than shared lines, and the job names are what the required
+# status checks and the Dependabot auto-merge workflow match on: worth having
+# in front of you. See the comment in dependabot-auto-merge.yml.
 
 jobs:
   event_file:

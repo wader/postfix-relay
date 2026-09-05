@@ -1,0 +1,218 @@
+name: scan
+
+on:
+  schedule:
+    # Daily, and deliberately not on the hour: github queues everything that
+    # asked for :00 together, and a job nobody is waiting for should not be in
+    # that queue.
+    #
+    # Daily is the cadence the thing being watched deserves. Debian ships a
+    # fix, and this image picks it up when its base tag moves -- dated
+    # trixie-*-slim tags land every two to three weeks -- so the window is
+    # weeks wide and a daily look is the cheapest thing that notices inside it.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+# Everything this does to the repository, it does by filing one issue.
+permissions:
+  contents: read
+  issues: write
+
+# Two runs must not race to file the same issue. Queue the second rather than
+# cancelling the first: the first is the one that would have opened it.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+# What this is, and what it deliberately is not.
+#
+# It scans the image people pull, on a clock, and never reports a check on a
+# pull request. That placement is the design rather than a limitation, and
+# three things settle it.
+#
+# ci.yml pushes nothing on a pull request, so a pull request has no published
+# image. A scan there would examine an artefact with no users while the one
+# with eleven million pulls went unexamined.
+#
+# A red here would never be attributable to the diff. ci.yml builds only what
+# the tree contains, so a pull request touching "run", a fixture or the README
+# cannot introduce a Debian CVE -- and its author holds no lever either, since
+# the remedy is a base image bump that dependabot.yml deliberately keeps out of
+# auto-merge. Every other gate in this tree -- ShellCheck, Pytest, Build Image
+# -- fails for something its author caused and can fix.
+#
+# And lint.yml's header already wrote the rule this follows: "An unpinned
+# linter fails somebody's unrelated pull request on the day it ships a new
+# check." A vulnerability database is that input by construction, because
+# pinning it is the same as not running this at all. So this stays off the pull
+# request path; promoting it to a required check means answering that argument
+# rather than assuming it.
+#
+# --ignore-unfixed is what makes a red mean something. Without it this reports
+# around 290 findings that Debian has assessed as not warranting a stable
+# update and nobody here can close. The largest single group of them, 68 of 287
+# rows when this was written, is perl -- in the image only so the
+# manually-invoked qshape keeps working, and executed by no relaying container.
+# With it, a red says exactly one thing: Debian shipped a fix that the
+# published image does not have.
+#
+# So this is expected to be green, and it was when it was written: trivy and
+# grype both reported zero fixable findings, and "apt-get -s full-upgrade"
+# inside the published image agreed with them. It is an alarm for a window, not
+# a backlog to work through.
+
+jobs:
+  trivy:
+    name: "Image Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Pinned and checksummed, and nothing bumps it, the way lint.yml installs
+      # shellcheck -- and here the reason is not hypothetical. The
+      # aquasecurity/trivy-action wrapper was compromised on 2026-03-19, when
+      # 76 of its 77 version tags were force-pushed to a credential stealer.
+      # Pinning that action by tag would not have helped, and pinning it by
+      # commit would tie this to a wrapper breached twice in a month. The job
+      # needs no checkout, no buildx and no QEMU, so skipping the dependency
+      # costs one curl.
+      #
+      # A binary that never moves costs this job much less than it costs a
+      # linter: the database is fetched fresh on every run and is what carries
+      # the signal.
+      #
+      # sha256 is the one from trivy_0.74.0_checksums.txt for the Linux-64bit
+      # tarball.
+      TRIVY_VERSION: v0.74.0
+      TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+      ISSUE_TITLE: "Fixable vulnerabilities in the published image"
+    steps:
+      - name: Helper for custom repo name
+        # The same resolution ci.yml uses to decide what to push. It has to
+        # agree with it: the point is to scan what was published, so the name
+        # cannot be written here independently and drift.
+        id: reponame
+        run: |
+          if [ "${DOCKER_REPO}" != "" ]; then
+            echo "DOCKER_REPO=${DOCKER_REPO}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "DOCKER_REPO=${{ github.repository }}" >> "${GITHUB_OUTPUT}"
+          fi
+        env:
+          DOCKER_REPO: "${{ secrets.DOCKER_REPO }}"
+
+      - name: Install trivy
+        # Into RUNNER_TEMP. Nothing is checked out in this job at all -- trivy
+        # pulls the published manifest itself, so there is no build context to
+        # keep it out of.
+        run: |
+          set -eu
+          version="${TRIVY_VERSION#v}"
+          url="https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${version}_Linux-64bit.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/trivy.tar.gz" "$url"
+          echo "${TRIVY_SHA256}  ${RUNNER_TEMP}/trivy.tar.gz" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/trivy"
+          tar -xzf "${RUNNER_TEMP}/trivy.tar.gz" -C "${RUNNER_TEMP}/trivy"
+          echo "${RUNNER_TEMP}/trivy" >> "${GITHUB_PATH}"
+
+      - name: Scan the published image
+        # linux/amd64, which is what the runner is. The three published
+        # platforms were measured to carry the same findings: every package the
+        # Dockerfile names resolves to the same Debian version on all three,
+        # because Debian keeps one source version across release
+        # architectures, and the one package that differs -- postsrsd, absent
+        # on armhf -- has none. That is an assumption about Debian rather than
+        # something this job verifies, so it is written down here.
+        #
+        # --exit-code 0 is deliberate, and the reason is the next step. Trivy
+        # exits non-zero both when it finds something and when it could not do
+        # its job, and those must not be confused: an unreachable database
+        # filed as a vulnerability would be worse than no scan. So findings are
+        # counted out of the report instead, and a non-zero exit from here can
+        # only mean trivy failed -- which skips every step below and fails the
+        # run, so it is an email rather than a wrong issue.
+        id: scan
+        run: |
+          set -eu
+          trivy --version
+          trivy image \
+            --scanners vuln \
+            --ignore-unfixed \
+            --severity HIGH,CRITICAL \
+            --format json \
+            --output "${RUNNER_TEMP}/trivy.json" \
+            --timeout 10m \
+            --exit-code 0 \
+            "${IMAGE}"
+          count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${RUNNER_TEMP}/trivy.json")
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          echo "${count} finding(s) with a fix available in ${IMAGE}"
+          trivy convert --format table "${RUNNER_TEMP}/trivy.json" \
+            | tee "${RUNNER_TEMP}/trivy.txt"
+        env:
+          IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+
+      - name: Open the finding issue
+        # One issue, held open for as long as the finding stands. A daily cron
+        # that commented every morning would teach everyone to filter it, so a
+        # run that finds the issue already open says nothing and leaves it be.
+        if: steps.scan.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -eu
+          # Matched on the title rather than through the search index, which
+          # lags by enough that a daily job would file a second one.
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number] | first // empty')
+          if [ -n "$existing" ] ; then
+            echo "Issue #${existing} is already open, leaving it alone."
+            exit 0
+          fi
+          {
+            echo "\`trivy image --ignore-unfixed --severity HIGH,CRITICAL\` found"
+            echo "vulnerabilities in \`${IMAGE}\` that Debian has already shipped a fix for."
+            echo
+            echo "The remedy is a build that re-resolves the packages: merge the pending"
+            echo "base image bump if there is one, or run the **ci** workflow from the"
+            echo "Actions tab with **Rebuild without the layer cache** ticked, which"
+            echo "re-resolves every package against the archive without waiting for the"
+            echo "next \`trixie-<date>-slim\` tag."
+            echo
+            echo "This issue is closed automatically once the scan comes back clean."
+            echo
+            echo "[Scan run](${RUN_URL})"
+            echo
+            echo '```'
+            head -c 50000 "${RUNNER_TEMP}/trivy.txt"
+            echo '```'
+          } > "${RUNNER_TEMP}/issue.md"
+          gh issue create --title "${ISSUE_TITLE}" --body-file "${RUNNER_TEMP}/issue.md"
+
+      - name: Close the finding issue
+        # The scan is clean, so whatever this job filed earlier is answered.
+        if: steps.scan.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -eu
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number] | first // empty')
+          if [ -z "$existing" ] ; then
+            echo "Nothing open, nothing to close."
+            exit 0
+          fi
+          gh issue close "$existing" --comment \
+            "\`${IMAGE}\` no longer has a vulnerability with a fix available. [Scan run](${RUN_URL})"
+
+      - name: Fail the run
+        # Last, so the issue is filed before the job goes red. The email github
+        # sends for a failed scheduled run is the immediate signal; the issue
+        # is the one that is still there next week.
+        if: steps.scan.outputs.count != '0'
+        run: |
+          echo "${{ steps.scan.outputs.count }} finding(s) with a fix available."
+          exit 1
