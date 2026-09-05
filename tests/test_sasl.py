@@ -256,6 +256,24 @@ def test_the_saslauthd_socket_is_restricted_to_the_sasl_group(authenticated_rela
         "stat -c %U:%G:%a /var/spool/postfix/var/run/saslauthd").strip() == 'root:sasl:710'
 
 
+def test_saslauthd_checks_passwords_as_root(authenticated_relay):
+    """The README's "What runs as root" table has a row for this, and the
+    capability advice under that table rests on which processes touch what a
+    client sent. Every other root process in the container supervises or logs;
+    this one reads a username and password off the network and checks them,
+    which is what makes the mode on the directory above the access control
+    rather than a detail. Asserted rather than described so that a future
+    change dropping it to its own user is noticed here, and the README with
+    it. (issue #294)
+    """
+    processes = container_exec(authenticated_relay, ["ps", "-eo", "uid,comm", "--no-headers"])
+    uids = [line.split()[0] for line in processes.splitlines()
+            if line.split()[1:2] == ['saslauthd']]
+
+    assert uids, f"saslauthd is not running: {processes}"
+    assert set(uids) == {'0'}, f"saslauthd runs as {sorted(set(uids))}, not root"
+
+
 def test_the_generated_pam_profile_reads_the_password_file(authenticated_relay):
     """SASL_Passwds names the file, and PAM is what actually opens it."""
     profile = container_exec(authenticated_relay, ["cat", "/etc/pam.d/smtp"])
