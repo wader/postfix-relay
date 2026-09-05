@@ -6,24 +6,13 @@ issues #14, #63, #78 and #92.
 
 import re
 
-import dkim
 import pytest
 
 from tests.helpers import (container_exec, container_log, container_stderr,
                            dkim_dns_record, exit_code_within, image_run,
-                           listening_sockets, postconf, restart, send)
+                           listening_sockets, postconf, restart, send, verifies)
 
 KEY_PATH = '/etc/opendkim/keys/example.com/sel1.private'
-
-
-def verifies(raw, record):
-    """Whether a signed message validates against the record it points at.
-
-    The public key is handed to the verifier directly instead of being looked
-    up: there is no DNS in the test network, and what has to be checked is that
-    the signature matches the record the container tells the user to publish.
-    """
-    return dkim.verify(raw, dnsfunc=lambda name, **kwargs: record.encode())
 
 
 def test_mail_is_signed_for_configured_domains_only(postfix_factory, mailpit):
