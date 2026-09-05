@@ -36,27 +36,27 @@ why merge commits name someone else's namespace.
 | `.claude/hooks/session-start.sh` | Starts the docker daemon and installs `tests/requirements.txt`, because a Claude Code on the web container has neither and both gates need them. Guarded on `CLAUDE_CODE_REMOTE=true`, so a local checkout is untouched, and best-effort: a failed step explains itself on stderr and the hook still exits 0, so check stderr before believing a build or test failure. |
 | `tests/__init__.py` | Empty; makes `tests` a package, which is what lets `conftest.py` name plugins as `tests.fixtures.*` and lets modules do `from tests.helpers import …`. pytest therefore has to be run from the repo root. There is no `tests/fixtures/__init__.py`. |
 | `tests/conftest.py` | Registers the four fixture modules as pytest plugins, and defines the failure plumbing: `print_log_on_failure`, an autouse `shared_container_logs` fixture, and a `pytest_runtest_makereport` wrapper hook that stashes the report on the item. |
-| `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py`, and by three of the four fixture modules. `file_missing` is defined and never called. |
-| `tests/requirements.txt` | Six pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not. |
+| `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py` and `test_ruleset.py`, and by three of the four fixture modules. `file_missing` is defined and never called. |
+| `tests/requirements.txt` | Seven pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `pyyaml`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not; `pyyaml` is there for `test_ruleset.py` alone. |
 | `tests/fixtures/shared_network.py` | Session-scoped `shared_network`: a testcontainers `Network()` with a generated, labelled name — not a fixed one, so an interrupted run leaves nothing for the next one to collide with. |
 | `tests/fixtures/postfix.py` | Seven fixtures: `postfix_image`, `upgrade_from_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH` / `POSTFIX_RELAY_IMAGE_PUBLISHED`, and the released image out of `tests/upgrade-from.Dockerfile`. |
 | `tests/mailpit.Dockerfile` | Not built and no part of any image. One `FROM axllent/mailpit:<tag>` line, so that Dependabot's docker ecosystem — whose file fetcher matches any name containing `dockerfile` — can offer a bump to the test peer. `tests/fixtures/mailpit.py` reads the tag back out of it. |
 | `tests/upgrade-from.Dockerfile` | The other unbuilt anchor: one `FROM mwader/postfix-relay:<version>` line, read back by `tests/fixtures/postfix.py`, naming the released image `tests/test_upgrade.py` starts before the one built from the tree. A release and not `latest` — see invariant 33. |
 | `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, whose image is read from `tests/mailpit.Dockerfile` rather than written here: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
-| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
+| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls the tag that was just pushed and runs `pytest -m smoke` against it. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. |
+| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
-| `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
+| `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error run healthcheck` — the only threshold the two scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
-| `.github/rulesets/master.json` | The `master` ruleset in github's export/import form: the four required status checks and nothing else. Conditioned on `~DEFAULT_BRANCH` rather than a literal `refs/heads/master`, so renaming the default branch does not quietly stop gating it. Nothing in the tree reads the file — it is the record that makes "CI blocks a bad pull request" checkable instead of believed, and it is what gets imported under Settings > Rules. |
+| `.github/rulesets/master.json` | The `master` ruleset in github's export/import form: the five required status checks and nothing else. Conditioned on `~DEFAULT_BRANCH` rather than a literal `refs/heads/master`, so renaming the default branch does not quietly stop gating it. `tests/test_ruleset.py` is what keeps it true; nothing else in the tree reads it. It is the record that makes "CI blocks a bad pull request" checkable instead of believed, and it is what gets imported under Settings > Rules. |
 
 There is no `CONTRIBUTING.md`, no linter *config* of any kind — `lint.yml`
-passes its one flag on the command line — and no per-file license header — see
-[Conventions](#conventions).
+passes both linters their selection on the command line — and no per-file
+license header — see [Conventions](#conventions).
 
 ## Dependency graph
 
@@ -77,7 +77,8 @@ pytest.ini ──addopts──> pytest-xdist   (-n auto --dist loadfile --maxpro
 
 tests/test_*.py
     │
-    ├──> tests/helpers.py         (every module but test_sendmail.py)
+    ├──> tests/helpers.py         (every module but test_sendmail.py and
+    │                              test_ruleset.py, which starts no container)
     │        └── once_across_workers  -> builds/pulls the image once per RUN,
     │                                     not once per xdist worker
     └──> fixtures, registered in tests/conftest.py as pytest_plugins:
@@ -166,8 +167,10 @@ it only ever builds the host's — follow the cross-build recipe in
 [README.md](README.md#testing). It pins the same binfmt image CI does, so a
 failure there means the same thing.
 
-There is no unit test layer: nothing runs without a docker daemon. Most tests
-start a real relay; the exception is `test_image.py`, which starts none — it
+One module runs without a docker daemon: `test_ruleset.py`, which reads
+`.github/rulesets/master.json` and the workflows and starts nothing. Everything
+else needs one. Most tests start a real relay; the exception is
+`test_image.py`, which starts none — it
 reads `docker inspect` output through `image_config`, asks a throwaway `sleep`
 container about the image's files through its `image_shell` fixture, and runs a
 command in one with `image_run`. When a test fails, `conftest.py` prints the
@@ -191,8 +194,11 @@ until CI runs.
 ### Lint
 
 ```bash
-shellcheck -S error run healthcheck   # what CI runs; exits 0
-shellcheck run healthcheck            # everything, at the stock threshold
+shellcheck -S error run healthcheck        # what CI runs; exits 0
+shellcheck run healthcheck                 # everything, at the stock threshold
+
+ruff check --no-cache --select F tests     # what CI runs; exits 0
+ruff check --statistics --select ALL tests # everything ruff has, for reference
 ```
 
 `run` and `healthcheck` are the two scripts that go into the image, and
@@ -202,12 +208,6 @@ stone to a stricter one: it is the only one the scripts pass, and the findings
 between it and the default are either noise or deliberate. The third shell
 script in the tree, the hook under `.claude/`, is not gated: it is no part of
 what ships.
-
-There is still no linter *configuration* anywhere in the repo (no
-`.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
-`.flake8`, `.ruff.toml` or `.pre-commit-config.yaml`) and no in-file
-`# shellcheck disable=`, so nothing is suppressed: what the gate lets through,
-it lets through because of the threshold alone.
 
 With shellcheck 0.11.0, which is the version `lint.yml` pins:
 
@@ -240,37 +240,70 @@ as a snapshot; the pin in `lint.yml` is what keeps a release from moving them
 under an unrelated pull request. Nothing bumps that pin — moving to a newer
 shellcheck is a deliberate edit, the way a base-image suite change is.
 
+`tests/` is all the python in the tree, and `lint.yml` gates it at
+`--select F` — pyflakes — as the **Ruff** check. The same decision made twice:
+`F` is the rules that find code which cannot work rather than code someone
+would write differently, and it is what the suite passes with no edit to any
+`.py` file. The one worth naming is `F811`, a test function replaced by a later
+one of the same name — pytest collects the second, the first one's assertions
+never run, and nothing says so. What `F` does *not* buy is worth knowing too:
+a fixture nobody requests is invisible to every pyflakes-family tool, a helper
+whose signature drifted needs pylint, and `file_missing` — the one dead helper
+the tree actually has — is seen at no ruff selection at all, `ALL` included.
+(#268, which asked for the gate, names all three as the thing it would catch.)
+
+Widening is a deliberate edit here too, and it is not free: `E` is 62 `E501`s
+at ruff's 88 columns on a suite whose longest line has always been 102, `I`
+reorders the imports of sixteen files, and `ruff format` would rewrite nineteen
+of the twenty-three. None of that is a defect today. The selection is written
+out rather than left to ruff's default for the same reason the version is
+pinned: on this tree, unchanged, the default is two findings under ruff 0.15.8
+and twenty-eight under 0.16.6, while `--select F` is the same on both. Nothing
+bumps that pin either.
+
+There is still no linter *configuration* anywhere in the repo (no
+`.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
+`.flake8`, `.ruff.toml` or `.pre-commit-config.yaml`) and no in-file
+`# shellcheck disable=`, so nothing is suppressed: what the gates let through,
+they let through because of the threshold and the selection alone. The tree's
+one suppression is a `# noqa: BLE001` in `tests/test_smtp.py`, inert under
+`--select F` and written for a rule nothing has ever selected.
+
 ## What blocks a pull request
 
 Four workflow files carry a `pull_request` trigger, but `dependabot-auto-merge.yml`
 is a no-op for anything not opened by `dependabot[bot]` — its single job has no
 display `name:`, so on an ordinary pull request it appears as a skipped
-`auto-merge` check. The six that can actually fail are:
+`auto-merge` check. The ones that can actually fail are:
 
 | Check | From | What it does |
 | --- | --- | --- |
 | **Build Image** | `ci.yml` | buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`. Nothing is pushed on a PR — the DockerHub login is skipped, and the build step sets `push: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}` — but the build has to succeed on **all three** architectures. The `dependabot[bot]` half of that condition covers the branch push Dependabot makes before opening its pull request: such a run reads Dependabot secrets only, so the Actions secrets the login needs arrive empty. This is the gate that catches architecture-specific packaging problems. |
 | **Pytest** | `test.yml` | `ubuntu-latest`, Python 3.13, `pip install -r tests/requirements.txt`, `pytest --junitxml=junit/test-results.xml`. |
 | **Pytest (arm64)** | `test.yml` | The same, natively, on `ubuntu-24.04-arm`. |
+| **Pytest (arm/v7, emulated)** | `test.yml` | Pins the QEMU binfmt image, builds `linux/arm/v7` and runs `pytest -m smoke -n0` against it — four tests, and the only ones that ever start the image whose packaging differs. It ran on `master` and behind a `test-emulated` label until #273; the label is gone, and 42-152s against 174-275s for either native job is why it can be on the path a pull request waits on without lengthening it. |
 | **Event File** | `test.yml` | Uploads the triggering event payload for the reporter. |
 | **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error run healthcheck`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
+| **Ruff** | `lint.yml` | The same shape, one job over: downloads ruff at the version and sha256 pinned in the job's `env:`, then `ruff check --no-cache --select F tests`. Seconds, no docker. See [Lint](#lint) for why that selection and not a wider one, and why it is spelled out rather than inherited. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
-**Pytest (arm/v7, emulated)** runs only on `master`, on a manual
-dispatch, or on a pull request labelled `test-emulated` — and the label is read
-from the event that started the run, so it takes effect on the *next* push to
-the branch. It pins the QEMU binfmt image, builds `linux/arm/v7`, and runs
-`pytest -m smoke -n0`.
-
-**Verify Published Image (amd64)** and **(arm64)** do not run on a pull request
-either: they are `needs: docker` and `master` only, because what they check is
-the publication the **Build Image** step makes there. Each pulls that tag the
-way a user would and runs `pytest -m smoke` against it — the only check that
-looks at what a push to `master` published rather than at an image built from
-the tree. It is no longer the only thing here that reaches the registry:
+**Verify Published Image (amd64)** and **(arm64)** do not run on a pull
+request: they are `needs: docker` and `master` only, because what they check is
+the publication **Build Image** makes there. Each pulls that image from the
+registry the way a user would and runs `pytest -m smoke` against it — the only
+checks that look at what a push to `master` published rather than at an image
+built from the tree. They are not alone in reaching the registry:
 `tests/test_upgrade.py` pulls a *released* tag, which is a different question
-(see 33). Nothing is rolled back when one fails; the tag is already out, and
-the check is what says so. (issue #266)
+(see 33). (issue #266) They pull it by *digest*, not by tag, and
+that is the whole of the arrangement below: what the build pushes is reachable
+under `sha-<commit>` and its digest, `latest` is not written by the build at
+all, and **Publish latest** — a fourth job, `needs` on all three — moves the
+tag onto that digest afterwards. So a failure here is no longer a report on an
+image users are already pulling: the tag stays where it was. (issue #272) The amd64 one carries one step the
+other does not: each job pulls the entry of the manifest list matching its own
+runner, so a missing or mislabelled entry would leave both green while the
+architecture that lost it fails to pull at all — that step reads the list
+itself. (issue #284)
 
 Notes a contributor will hit:
 
@@ -280,11 +313,13 @@ Notes a contributor will hit:
   check called "docker". Which checks are actually *required* is
   `.github/rulesets/master.json`, an export of the `master` ruleset in the form
   github's "Import a ruleset" takes and re-exports, so what gates a merge can be
-  diffed against the setting rather than taken on trust. Four are required:
-  **Build Image**, **Pytest**, **Pytest (arm64)** and **ShellCheck**. Renaming a
-  job means editing that file in the same commit — no check catches that drift,
-  and a required context naming a job that no longer reports blocks every pull
-  request until someone with admin rights notices.
+  diffed against the setting rather than taken on trust. Five are required:
+  **Build Image**, **Pytest**, **Pytest (arm64)**, **Ruff** and **ShellCheck**;
+  a workflow can report more than one of them, which is what `lint.yml` does
+  with the last two. Renaming a job means editing that file in the same commit,
+  which `tests/test_ruleset.py` is there to catch: a required context naming a
+  job that no longer reports blocks every pull request until someone with admin
+  rights notices, and that test fails on the rename instead.
 - **Every check that is not on that list is off it for a reason**, and the
   reasons are the point of writing the list down. **Test Results** is published by
   `test-results.yml` on a `workflow_run` whose job carries
@@ -294,12 +329,15 @@ Notes a contributor will hit:
   check. A check that can pass by not running is the false assurance this list
   exists to remove, and its verdict is derived anyway: it republishes the junit
   files **Pytest** already failed on. **Event File** uploads an artifact and
-  reaches no verdict at all. **Pytest (arm/v7, emulated)** does not run on a
-  pull request unless it is labelled `test-emulated`, which nearly none are; the
-  header comment in `dependabot-auto-merge.yml` ruled it out first. And the two
-  **Verify Published Image** jobs have nothing to report on a branch at all:
-  what they check is the image a push to `master` published, so on a pull
-  request they are skipped by the `if:` that keeps them off it.
+  reaches no verdict at all. **Pytest (arm/v7, emulated)** runs on every pull
+  request since #273, and is still not required: its verdict comes from an
+  emulator, where a QEMU artefact reads like a real failure, so it reports and a
+  person looks rather than blocking a merge. Requiring it is a separate decision,
+  and `.github/rulesets/master.json` is where it would be recorded. And the two
+  **Verify Published Image** jobs, and **Publish latest** with them, have
+  nothing to report on a branch at all: what they check, and what one of them
+  then tags, is the image a push to `master` published, so on a pull request
+  they are skipped by the `if:` that keeps them off it.
 - **The ruleset carries that one rule and no bypass actors.**
   `strict_required_status_checks_policy` is false, so a branch does not have to
   be brought up to date with `master` before it merges — with dependabot
@@ -324,10 +362,13 @@ Notes a contributor will hit:
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
   still break without a change in this repo.
-- **ShellCheck is a gate, but a narrow one.** It fails only on shellcheck
-  errors in `run` and `healthcheck` — nothing about python, yaml, the
-  `Dockerfile` or the README is linted anywhere. Do not widen it as a side
-  effect of an unrelated change: `-S warning` fails on master today.
+- **Both linters are gates, but narrow ones.** **ShellCheck** fails only on
+  shellcheck errors in `run` and `healthcheck`; **Ruff** only on pyflakes
+  findings under `tests/`. Nothing about yaml, the `Dockerfile` or the README is
+  linted anywhere, and python outside `tests/` would not be either — the job
+  names the directory. Do not widen either as a side effect of an unrelated
+  change: `-S warning` fails on master today, and every ruff selection past `F`
+  costs edits to files that are not wrong.
 
 ## Conventions
 

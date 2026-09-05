@@ -5,7 +5,8 @@ on:
     branches:
       - 'master'
   pull_request:
-  # So the emulated job below can be asked for without pushing anything.
+  # So the workflow can be asked for on a branch with no pull request open,
+  # which is the only way left to reach the emulated job without one.
   workflow_dispatch:
 
 concurrency:
@@ -106,16 +107,27 @@ jobs:
     # recompiled: Debian builds no postsrsd for armhf, so the image ships
     # without it and "run" refuses to start when SRS is asked for anyway.
     #
-    # Emulation is slow and its failures are harder to read than real ones, so
-    # this stays off the path a pull request waits on: master, a manual run, or
-    # a pull request labelled "test-emulated" for the changes that want it. The
-    # label is read from the event that started the run, so it takes effect on
-    # the next push to the branch; "labeled" is deliberately not a trigger here,
-    # because Dependabot labels its pull requests as it opens them and the
-    # concurrency group above would have that cancel the run it just started.
-    if: >-
-      github.event_name != 'pull_request'
-      || contains(github.event.pull_request.labels.*.name, 'test-emulated')
+    # It runs on a pull request like the two native ones, and used not to: it
+    # sat behind a "test-emulated" label, read from the event that started the
+    # run, so the label took effect on the next push and the one architecture
+    # whose packaging differs was the only one whose tests ran after the merge.
+    # "Build Image" does build all three, but the Dockerfile has no RUN below
+    # the COPY, so a build starts neither script and no daemon: "run"'s
+    # start-up budgets, the greeting probe, the supervision loop and the health
+    # check are all invisible to it.
+    #
+    # Emulation is slow, but not on the scale that kept this off the path.
+    # Measured over seven runs on master the job takes 42-152s end to end,
+    # against 174-275s for either native pytest job, so a pull request waits on
+    # those and never on this one; the slowest of the seven is the run whose
+    # Dockerfile changed, where the build step is an emulated build rather than
+    # a cache hit. The runner is free on a public repository.
+    #
+    # Its failures are still harder to read than a native run's, which is why
+    # running it is all this asks for: it reports, a person looks, and a QEMU
+    # artefact costs a second look instead of a merge. Whether it also blocks
+    # one is a separate decision, recorded in .github/rulesets/master.json,
+    # which this leaves alone.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
