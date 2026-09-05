@@ -7,8 +7,8 @@ unless they ask for more (issue #58).
 
 import re
 
-from tests.helpers import (container_exec, container_log, restart, send,
-                           wait_for_file, wait_for_log)
+from tests.helpers import (container_exec, container_log, file_missing, restart,
+                           send, wait_for_file, wait_for_log)
 
 MAIL_LOG_LINE = re.compile(r'^postfix/\w+\[\d+\]: ')
 TIMESTAMPED_MAIL_LOG_LINE = re.compile(r'^\d{4}-\d{2}-\d{2}T[\d:.+]+ \S+ postfix/\w+\[\d+\]: ')
@@ -81,7 +81,7 @@ def test_an_existing_rsyslog_conf_is_left_alone(postfix_factory, mailpit):
 
     assert 'Skipping /etc/rsyslog.conf generating' in container_log(relay)
     assert container_exec(relay, ["cat", "/etc/rsyslog.conf"]) == config
-    assert relay.exec(["test", "-e", "/var/log/mail.log"]).exit_code != 0
+    assert file_missing(relay, '/var/log/mail.log')
 
     send(relay, subject='logged as configured')
     mailpit.wait_for_message('logged as configured')
