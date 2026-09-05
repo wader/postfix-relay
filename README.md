@@ -186,7 +186,10 @@ Every `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`, `OPENDKIM_` and `POSTSRSD_`
 variable can be suffixed with `_FILE` and given a path instead of a value. The
 container then reads the value from that file, so credentials never have to be
 put in the environment where `docker inspect`, the compose file and every
-process in the container can see them. A trailing newline is ignored.
+process in the container can see them. Trailing newlines are ignored, however
+many of them there are; trailing spaces are kept, so a file ending in one
+gives a value ending in one — worth checking on a password, where the
+difference is invisible.
 
 ```
 environment:
@@ -447,13 +450,23 @@ actually handles mail is not root:
 | Process | Runs as |
 | --- | --- |
 | the start-up script, `master`, `rsyslogd` | `root` |
+| `saslauthd`, when `SASL_Passwds` is set | `root` |
 | `smtpd`, `cleanup`, `qmgr`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
 | `opendkim` | `opendkim` |
 | `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
 
-The root processes supervise and log; they do not parse untrusted input. Most
-of what docker grants the container by default is therefore unused and can be
-taken away:
+As the relay ships, the root processes supervise and log; they do not parse
+untrusted input. Setting `SASL_Passwds` adds one that does: `saslauthd` runs as
+root and checks the username and password an SMTP client sent, through PAM.
+That is what it is for, and it is why the directory holding its socket is
+created `root:sasl` mode `710` rather than left at the world-writable mode
+`saslauthd` gives the socket itself -- an unauthenticated password check
+reachable by every uid in the container would be an oracle for guessing at the
+passwords. Nothing to configure, but worth knowing before deciding what a
+relay of yours may do.
+
+Either way, most of what docker grants the container by default is unused and
+can be taken away:
 
 ```
 cap_drop:
@@ -586,6 +599,30 @@ valid. Mail still in the queue is handed to the new postfix; if you would
 rather not upgrade with mail in flight, deliver what is queued and check the
 queue is empty first (see [the queue
 section](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)).
+
+Pulling is also how a security fix in one of the Debian packages reaches you,
+so it is worth knowing what moves the image. There is no `apt-get upgrade` at
+start-up — a container patching itself would drift away from the image it says
+it is — and the image is instead rebuilt when its Debian base tag moves, which
+is every few weeks. A scheduled job scans the published image daily and opens
+an issue if it finds a vulnerability Debian has already shipped a fix for; if
+it is quiet, that is the state it is expected to be in. You do not have to take
+that on trust, and your risk appetite may not be ours: the image is public, so
+
+```
+trivy image mwader/postfix-relay
+grype mwader/postfix-relay
+```
+
+need no account and tell you what is in the one you are actually running. Both
+will list findings the daily job deliberately ignores, because Debian has
+assessed them as not warranting a stable update and no rebuild here can clear
+them. The largest single group of those is `perl`, which is present only so
+that [`qshape`](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)
+keeps working and which a relaying container never runs. What actually handles
+mail — postfix, the TLS library, the SASL stack — is a much smaller surface, and
+[What runs as root](#what-runs-as-root-and-what-to-take-away) is where to look
+next if you want to shrink it.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
