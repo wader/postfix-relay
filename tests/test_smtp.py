@@ -345,14 +345,21 @@ def test_a_refused_message_leaves_the_session_usable(smtp, mailpit):
 
 def test_a_message_the_relay_accepted_is_reported_as_sent(postfix, mailpit):
     """status=sent in the log is what an operator greps for, and it has to
-    mean the next hop took the message."""
-    send(postfix, subject='logged as sent')
+    mean the next hop took the message.
+
+    On its own recipient and its own line, the way the message-id tests
+    above already do it. The relay is shared, so a status=sent and a
+    to=<receiver@example.com> somewhere in its log are as easily another
+    test's delivery as this one's: with the send() below deleted, the
+    assertion this replaces still passed.
+    """
+    send(postfix, recipients=('reported-as-sent@example.com',), subject='logged as sent')
     message = mailpit.wait_for_message('logged as sent')
 
-    log = wait_for_log(postfix, 'status=sent')
+    delivery = wait_for_log_line(postfix, 'to=<reported-as-sent@example.com>')
 
     assert message['ID']
-    assert 'to=<receiver@example.com>' in log
+    assert 'status=sent' in delivery
 
 
 def test_the_queue_is_empty_once_the_mail_is_gone(postfix, mailpit):
