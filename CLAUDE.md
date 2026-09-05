@@ -46,7 +46,7 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
+| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's — never `latest`, and on a tag ref nothing at all: a release builds nothing and instead points the version tags at the `sha-<commit>` image `master` already published and verified. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error run healthcheck` — the only threshold the two scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
@@ -298,11 +298,23 @@ that is the whole of the arrangement below: what the build pushes is reachable
 under `sha-<commit>` and its digest, `latest` is not written by the build at
 all, and **Publish latest** — a fourth job, `needs` on all three — moves the
 tag onto that digest afterwards. So a failure here is no longer a report on an
-image users are already pulling: the tag stays where it was. (issue #272) The amd64 one carries one step the
-other does not: each job pulls the entry of the manifest list matching its own
-runner, so a missing or mislabelled entry would leave both green while the
-architecture that lost it fails to pull at all — that step reads the list
-itself. (issue #284)
+image users are already pulling: the tag stays where it was. (issue #272) The
+amd64 one carries one step the other does not: each job pulls the entry of the
+manifest list matching its own runner, so a missing or mislabelled entry would
+leave both green while the architecture that lost it fails to pull at all —
+that step reads the list itself. (issue #284)
+
+A release tag reaches the same digest by a shorter road: it builds nothing.
+The commit a tag names has been on `master` first in every release this
+repository has cut, so its image is already in the registry under
+`sha-<commit>`, already pulled back and smoke-tested; **Build Image**'s last
+step copies that manifest onto the version tags with `imagetools`, the way
+**Publish latest** copies it onto `latest`. Rebuilding was the defect: the
+`Dockerfile` pins the Debian base by date but the `apt install` under it is
+unversioned, so a tag cut weeks after the merge resolved a package set no
+check had ever started, and none of the three jobs above look at a tag ref.
+The copy also refuses a tag on a commit `master` never published, which is
+the one thing nothing checked before.
 
 **Image Scan** does not run on a pull request either, and for a reason of its
 own rather than a scheduling one: `scan.yml` carries no `pull_request` trigger

@@ -117,8 +117,10 @@ jobs:
           # action wants to see then.
           no-cache: ${{ inputs.no-cache || false }}
       -
+        # Tag refs are excluded here and handled by the step below, which
+        # builds nothing at all. What is left is branches and pull requests.
         name: Build and push branch or test PR
-        if: github.ref != 'refs/heads/master'
+        if: github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -130,6 +132,59 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           no-cache: ${{ inputs.no-cache || false }}
+      -
+        # A release builds nothing, because the image it releases already
+        # exists. Every release tag this repository has cut names a commit
+        # that was on master first, so that commit was built here, pushed
+        # under "sha-<commit>", pulled back on both runner architectures and
+        # smoke-tested before latest was allowed onto it. Building again would
+        # publish something else under the version tags: the Dockerfile pins
+        # the Debian base by date, but the apt install below it is unversioned
+        # and reads the live archive, so a tag cut a fortnight after the merge
+        # resolves a package set the verified image never had -- and none of
+        # the jobs below look at a tag ref, so nothing would ever start it.
+        #
+        # So the version tags are pointed at that digest instead, with the
+        # same imagetools copy "Publish latest" makes: same manifest, same
+        # three architectures, same attestations. The source is docker_meta's
+        # own "sha-" tag rather than a sha spelled out here, so it cannot
+        # drift from what the master run pushed, and the inspect is what turns
+        # a tag on a commit master never published into a red job rather than
+        # a release built out of nothing.
+        name: Publish the release tags
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -eu
+          source=
+          targets=()
+          while IFS= read -r tag ; do
+            case "${tag}" in
+              "")      continue ;;
+              *:sha-*) source="${tag}" ;;
+              *)       targets+=(-t "${tag}") ;;
+            esac
+          done <<< "${TAGS}"
+
+          # A tag that is not semver produces no version tag at all, only the
+          # "sha-" one that master already pushed. There is nothing to move.
+          if [ ${#targets[@]} -eq 0 ] ; then
+            echo "::notice::${GITHUB_REF} carries no version tag, nothing to publish"
+            exit 0
+          fi
+          if [ -z "${source}" ] ; then
+            echo "::error::docker_meta produced no sha- tag for ${GITHUB_REF}"
+            exit 1
+          fi
+          if ! docker buildx imagetools inspect "${source}" > /dev/null 2>&1 ; then
+            echo "::error::${source} is not in the registry, so this commit was" \
+                 "never built and verified on master. Tag a commit that was."
+            exit 1
+          fi
+
+          docker buildx imagetools create "${targets[@]}" "${source}"
+          echo "released ${source}"
+        env:
+          TAGS: "${{ steps.docker_meta.outputs.tags }}"
 
   verify_published_amd64:
     name: "Verify Published Image (amd64)"

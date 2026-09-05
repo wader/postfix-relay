@@ -867,6 +867,13 @@ onto that image. It is the only check that looks at the image users actually
 pull, and it runs before they can pull it: an image that does not come up
 leaves `latest` where it was.
 
+A release is the same image again rather than another one. Pushing a version
+tag builds nothing: the commit it names was on `master` first, so its image is
+already in the registry, already pulled back and smoke-tested, and the version
+tags are pointed at it. So `1.2.18` and the `latest` it was cut from are the
+same bytes, and a tag on a commit `master` never published fails rather than
+releasing something no check has seen.
+
 | File | What it covers |
 | --- | --- |
 | `test_image.py` | The published image before anything runs: the defaults from the Dockerfile, the declared volumes, the exposed port, the health check, the programs the README has users run out of it |
