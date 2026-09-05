@@ -818,16 +818,17 @@ and has no `postsrsd`. That runs on every pull request, like the two native
 runs. Emulation is slow enough that the rest is not worth its minutes, and
 every wait in the suite is measured against a native run.
 
-All of that tests an image built from the tree. Every push to `master` also
-publishes `latest`, and what reaches the registry is built by buildx rather
-than by the daemon the suite uses, so a check after the push pulls that tag on
-`amd64` and on `arm64` -- the way anyone else pulls it -- and runs the same
-smoke tests against it. It also reads the manifest that tag points at, and
-fails if it does not list all three architectures that were built: each half
-of the check pulls the entry for its own architecture, so the one with no
-runner is only visible there. It is the only check that looks at the image
-users actually pull. Nothing is rolled back when it fails: the tag is out by then,
-and the check is what says so.
+All of that tests an image built from the tree. What reaches the registry is
+built by buildx rather than by the daemon the suite uses, so a push to `master`
+publishes the image under its commit before it publishes it under `latest`:
+the pushed image is pulled back on `amd64` and on `arm64` -- the way anyone
+else pulls it -- and the same smoke tests are run against it. Its manifest is
+read too, and the push fails if it does not list all three architectures that
+were built: each half of the check pulls the entry for its own architecture,
+so the one with no runner is only visible there. Only then is `latest` moved
+onto that image. It is the only check that looks at the image users actually
+pull, and it runs before they can pull it: an image that does not come up
+leaves `latest` where it was.
 
 | File | What it covers |
 | --- | --- |

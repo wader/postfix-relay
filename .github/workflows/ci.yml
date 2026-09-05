@@ -18,6 +18,13 @@ jobs:
   docker:
     name: "Build Image"
     runs-on: ubuntu-latest
+    outputs:
+      # What the jobs below pull and what "Publish latest" promotes. A digest
+      # rather than a tag: it names this run's image and cannot be moved by
+      # another run pushing between the build and the promotion. The repository
+      # name is not passed with it -- a job output holding a secret is redacted
+      # on the runner -- so each job reads that back for itself.
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       -
         name: Checkout
@@ -65,7 +72,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
-        name: Build and push master as latest
+        # Still master's own step, and still an unconditional push: the
+        # dependabot exclusion below belongs to branch pushes, where the run
+        # reads Dependabot secrets and cannot log in, and putting it here would
+        # leave a master push made by that actor building an image the jobs
+        # below then went looking for.
+        #
+        # What changed is the tags. This used to write the tag users pull,
+        # straight out of buildx; now it pushes docker_meta's -- on master the
+        # branch name and "sha-<commit>" -- and "Publish latest" below moves
+        # latest onto the digest afterwards, once the image has been pulled
+        # back and tested. "latest" is not among these tags and is never
+        # written here ("latest=false" in the flavor above).
+        name: Build and push master
+        id: build
         if: github.ref == 'refs/heads/master'
         uses: docker/build-push-action@v7
         with:
@@ -73,7 +93,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
           push: true
-          tags: ${{ steps.reponame.outputs.DOCKER_REPO }}:latest
+          tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -140,7 +160,8 @@ jobs:
         # pull" on the architecture that lost it fails or fetches something
         # else. The list is the only place all three are visible at once, and
         # imagetools reads it straight from the registry, so this costs a
-        # request and runs before anything is pulled.
+        # request and runs before anything is pulled -- and before latest is
+        # made to point at any of it.
         #
         # "linux/arm64", not the "linux/arm64/v8" the build asks for: v8 is
         # arm64's default variant and buildx drops it when it writes the
@@ -152,7 +173,7 @@ jobs:
         # "unknown/unknown" and are not architectures. Keep the list in step
         # with the "platforms:" above.
         env:
-          TAG: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          TAG: "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
         run: |
           expected="linux/amd64 linux/arm/v7 linux/arm64"
           published=$(docker buildx imagetools inspect --raw "${TAG}" |
@@ -166,12 +187,13 @@ jobs:
           fi
 
       - name: Pull the published image
-        # By tag and without a platform, which is what a user's docker does:
-        # the daemon picks the entry of the manifest list that matches this
-        # runner, and an entry that is missing or mislabelled fails here rather
-        # than in a test. A master run that publishes while this one is pulling
-        # would leave this testing the newer image, which its own run tests too.
-        run: docker pull "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+        # From the registry and without a platform, which is what a user's
+        # docker does: the daemon picks the entry of the manifest list that
+        # matches this runner, and an entry that is missing or mislabelled
+        # fails here rather than in a test. By digest rather than by tag: this
+        # is the image this run pushed, not whatever a master run finishing
+        # alongside it has since put under the same name.
+        run: docker pull "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
 
       - name: Setup python
         uses: actions/setup-python@v7
@@ -192,7 +214,7 @@ jobs:
         # workflow, and this job's own verdict is the signal.
         timeout-minutes: 10
         env:
-          POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
           # This image is the runner's own architecture, which the fixture
           # otherwise refuses for looking like a stale local build.
           POSTFIX_RELAY_IMAGE_PUBLISHED: "1"
@@ -227,7 +249,7 @@ jobs:
           DOCKER_REPO: "${{ secrets.DOCKER_REPO }}"
 
       - name: Pull the published image
-        run: docker pull "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+        run: docker pull "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
 
       - name: Setup python
         uses: actions/setup-python@v7
@@ -241,7 +263,57 @@ jobs:
       - name: Run the smoke tests
         timeout-minutes: 10
         env:
-          POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
           POSTFIX_RELAY_IMAGE_PUBLISHED: "1"
           POSTFIX_RELAY_ARCH: "arm64"
         run: pytest -m smoke
+
+  promote:
+    name: "Publish latest"
+    # The tag users pull, written only now. Until this job runs, what the build
+    # pushed is reachable under its "sha-" tag and its digest and nothing else,
+    # so latest still names the last image that got this far. It moves once the
+    # image behind that digest has been pulled back from the registry on both
+    # runner architectures and has started, reported healthy and relayed a
+    # whole message on each -- which is the difference between the suite
+    # gating what merges and gating what ships. (issue #272)
+    #
+    # It cannot make the publication conditional on the whole suite: that runs
+    # in test.yml, and a job cannot wait on another workflow. What it does gate
+    # on is the four smoke tests, run against the artefact itself rather than a
+    # local build of the same tree.
+    needs: [docker, verify_published_amd64, verify_published_arm64]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      -
+        name: Helper for custom repo name
+        id: reponame
+        run: |
+          if [ "${DOCKER_REPO}" != "" ]; then
+            echo "DOCKER_REPO=${DOCKER_REPO}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "DOCKER_REPO=${{ github.repository }}" >> "${GITHUB_OUTPUT}"
+          fi
+        env:
+          DOCKER_REPO: "${{ secrets.DOCKER_REPO }}"
+      -
+        name: Login to DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      -
+        name: Point latest at the image that was verified
+        # imagetools copies the manifest list rather than building or pushing
+        # anything again: latest ends up on the same digest, with the same three
+        # architectures and the same provenance attestations under it. Verified
+        # with "--dry-run" against the published image, which returned the index
+        # entry for entry.
+        run: |
+          docker buildx imagetools create -t "${REPO}:latest" "${REPO}@${DIGEST}"
+          echo "latest -> ${DIGEST}"
+        env:
+          REPO: "${{ steps.reponame.outputs.DOCKER_REPO }}"
+          DIGEST: "${{ needs.docker.outputs.digest }}"
