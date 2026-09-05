@@ -46,7 +46,7 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. Two jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls the tag that was just pushed and runs `pytest -m smoke` against it. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. |
+| `.github/workflows/ci.yml` | `name: ci`. Three jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls the tag that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
@@ -266,7 +266,11 @@ the publication the **Build Image** step makes there. Each pulls that tag the
 way a user would and runs `pytest -m smoke` against it — the only check in the
 tree that looks at the artefact on the registry rather than at one built from
 the tree. Nothing is rolled back when one fails; the tag is already out, and
-the check is what says so. (issue #266)
+the check is what says so. (issue #266) The amd64 one carries one step the
+other does not: each job pulls the entry of the manifest list matching its own
+runner, so a missing or mislabelled entry would leave both green while the
+architecture that lost it fails to pull at all — that step reads the list
+itself. (issue #284)
 
 Notes a contributor will hit:
 
