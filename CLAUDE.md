@@ -301,11 +301,17 @@ that is the whole of the arrangement below: what the build pushes is reachable
 under `sha-<commit>` and its digest, `latest` is not written by the build at
 all, and **Publish latest** — a fourth job, `needs` on all three — moves the
 tag onto that digest afterwards. So a failure here is no longer a report on an
-image users are already pulling: the tag stays where it was. (issue #272) The
-amd64 one carries one step the other does not: each job pulls the entry of the
-manifest list matching its own runner, so a missing or mislabelled entry would
-leave both green while the architecture that lost it fails to pull at all —
-that step reads the list itself. (issue #284)
+image users are already pulling: the tag stays where it was. (issue #272) That
+job asks the remote what `master` points at before it tags, and stands down
+when the answer is not the commit it built: master runs are deliberately not
+cancelled, so two merges close together overlap, and the property wanted is
+that `latest` follows `master`'s head rather than whichever run happened to
+finish last. Standing down is a green job, an unreadable answer is a red one —
+a tag that did not move must not be mistaken for a tag that was not supposed
+to. (issue #306) The amd64 one carries one step the other does not: each job
+pulls the entry of the manifest list matching its own runner, so a missing or
+mislabelled entry would leave both green while the architecture that lost it
+fails to pull at all — that step reads the list itself. (issue #284)
 
 A release tag reaches the same digest by a shorter road: it builds nothing.
 The commit a tag names has been on `master` first in every release this
@@ -382,8 +388,11 @@ Notes a contributor will hit:
 - `ci.yml` runs on pushes to every branch and tag, plus `pull_request` and
   `workflow_dispatch`; `test.yml` runs on pushes to `master` only, plus
   `pull_request` and `workflow_dispatch`. Both cancel in-flight runs on any ref
-  but `master`. `scan.yml` is the only one with a `schedule:`, and the only one
-  with no `pull_request` trigger.
+  but `master`. That exemption is deliberate — a cancelled `master` run is one
+  that never published — and it is what makes two merges close together
+  overlap, which is why **Publish latest** checks `master`'s head before it
+  moves the tag. `scan.yml` is the only one with a `schedule:`, and the only
+  one with no `pull_request` trigger.
 - Version skew: CI pins Python 3.13, and nothing pins a Python version locally.
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
