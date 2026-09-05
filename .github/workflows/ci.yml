@@ -171,10 +171,13 @@ jobs:
   verify_published_arm64:
     name: "Verify Published Image (arm64)"
     # The same run as the one above, on one of github's arm64 runners, so that
-    # both entries of the manifest that users pull are answered for. The third,
-    # arm/v7, has no runner: emulating it would add half an hour to every push
-    # to master to re-check an image test.yml already builds and smoke-tests
-    # from this same commit.
+    # two of the three entries of the manifest users pull are answered for. The
+    # third, arm/v7, has no runner and is not emulated here. Not for the cost:
+    # the emulated job in test.yml measures 42-152s, and that includes building
+    # the image, which this would not do. What goes unanswered for arm/v7 is
+    # narrower than it is for the other two -- test.yml starts an arm/v7 image
+    # built from this same commit on every pull request, so what is left
+    # unchecked there is the registry round trip rather than the image.
     needs: docker
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04-arm
