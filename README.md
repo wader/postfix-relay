@@ -186,7 +186,10 @@ Every `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`, `OPENDKIM_` and `POSTSRSD_`
 variable can be suffixed with `_FILE` and given a path instead of a value. The
 container then reads the value from that file, so credentials never have to be
 put in the environment where `docker inspect`, the compose file and every
-process in the container can see them. A trailing newline is ignored.
+process in the container can see them. Trailing newlines are ignored, however
+many of them there are; trailing spaces are kept, so a file ending in one
+gives a value ending in one — worth checking on a password, where the
+difference is invisible.
 
 ```
 environment:
