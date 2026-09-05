@@ -10,5 +10,6 @@ dkimpy==1.1.8
 docker==7.2.0
 pytest==9.1.1
 pytest-xdist==3.8.0
+pyyaml==6.0.3
 requests==2.34.2
 testcontainers[mailpit]==4.15.0

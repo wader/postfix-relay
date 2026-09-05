@@ -822,8 +822,11 @@ All of that tests an image built from the tree. Every push to `master` also
 publishes `latest`, and what reaches the registry is built by buildx rather
 than by the daemon the suite uses, so a check after the push pulls that tag on
 `amd64` and on `arm64` -- the way anyone else pulls it -- and runs the same
-smoke tests against it. It is the only check that looks at the image users
-actually pull. Nothing is rolled back when it fails: the tag is out by then,
+smoke tests against it. It also reads the manifest that tag points at, and
+fails if it does not list all three architectures that were built: each half
+of the check pulls the entry for its own architecture, so the one with no
+runner is only visible there. It is the only check that looks at the image
+users actually pull. Nothing is rolled back when it fails: the tag is out by then,
 and the check is what says so.
 
 | File | What it covers |
@@ -845,6 +848,7 @@ and the check is what says so.
 | `test_secrets.py` | Configuration read from a file instead of the environment, and what the health check still expects |
 | `test_qshape.py` | The queue tool the troubleshooting section has users run |
 | `test_upgrade.py` | Starting on the state the last released image wrote, which is what the "Upgrading" section promises |
+| `test_ruleset.py` | The required status checks recorded in `.github/rulesets/master.json`, against the jobs that report them |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and
