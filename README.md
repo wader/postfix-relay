@@ -587,6 +587,30 @@ rather not upgrade with mail in flight, deliver what is queued and check the
 queue is empty first (see [the queue
 section](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)).
 
+Pulling is also how a security fix in one of the Debian packages reaches you,
+so it is worth knowing what moves the image. There is no `apt-get upgrade` at
+start-up — a container patching itself would drift away from the image it says
+it is — and the image is instead rebuilt when its Debian base tag moves, which
+is every few weeks. A scheduled job scans the published image daily and opens
+an issue if it finds a vulnerability Debian has already shipped a fix for; if
+it is quiet, that is the state it is expected to be in. You do not have to take
+that on trust, and your risk appetite may not be ours: the image is public, so
+
+```
+trivy image mwader/postfix-relay
+grype mwader/postfix-relay
+```
+
+need no account and tell you what is in the one you are actually running. Both
+will list findings the daily job deliberately ignores, because Debian has
+assessed them as not warranting a stable update and no rebuild here can clear
+them. The largest single group of those is `perl`, which is present only so
+that [`qshape`](#mail-is-piling-up-and-i-want-to-know-what-the-queue-is-doing)
+keeps working and which a relaying container never runs. What actually handles mail —
+postfix, the TLS library, the SASL stack — is a much smaller surface, and
+[What runs as root](#what-runs-as-root-and-what-to-take-away) is where to look
+next if you want to shrink it.
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- LOGGING -->

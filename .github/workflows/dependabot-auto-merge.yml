@@ -14,6 +14,15 @@
 # "Pytest (arm/v7, emulated)" does not run on a pull request unless it is
 # labelled "test-emulated", which is nearly all of them, so it is not a
 # candidate for the required list whatever github makes of a skipped check.
+#
+# "Image Scan", from scan.yml, is not on that list either and is not a
+# candidate for it. It runs on a schedule against the published image and
+# never on a pull request, so it reports no check here at all; scan.yml's
+# header says why letting a vulnerability database decide a pull request would
+# be the wrong trade. It matters for auto-merge that it stays that way: these
+# pull requests merge themselves once the required checks pass, and a gate
+# whose verdict changes overnight for reasons unrelated to the diff would
+# block a bump on a morning when the bump is the fix.
 
 name: Dependabot auto-merge
 

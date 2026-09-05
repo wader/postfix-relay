@@ -45,10 +45,11 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. |
+| `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. Also `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
+| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. Never runs on a pull request. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment is also where the check names are recorded. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests` for the mailpit anchor. |
 
@@ -251,6 +252,11 @@ from the event that started the run, so it takes effect on the *next* push to
 the branch. It pins the QEMU binfmt image, builds `linux/arm/v7`, and runs
 `pytest -m smoke -n0`.
 
+An eighth, **Image Scan** from `scan.yml`, has no `pull_request` trigger at all
+and so never reports a check on one. That is the point of it rather than an
+omission — see invariant 33 — and it is why nothing above changes for a
+contributor.
+
 Notes a contributor will hit:
 
 - **Required checks match the job's `name:`**, never the workflow name and
@@ -268,9 +274,11 @@ Notes a contributor will hit:
   in `test-results.yml`; everything else is on a major tag, and Dependabot's
   weekly `github-actions` ecosystem bumps them. Do not "normalise" that
   exception away.
-- `ci.yml` runs on pushes to every branch and tag; `test.yml` runs on pushes to
-  `master` only, plus `pull_request` and `workflow_dispatch`. Both cancel
-  in-flight runs on any ref but `master`.
+- `ci.yml` runs on pushes to every branch and tag, plus `pull_request` and
+  `workflow_dispatch`; `test.yml` runs on pushes to `master` only, plus
+  `pull_request` and `workflow_dispatch`. Both cancel in-flight runs on any ref
+  but `master`. `scan.yml` is the only one with a `schedule:`, and the only one
+  with no `pull_request` trigger.
 - Version skew: CI pins Python 3.13, and nothing pins a Python version locally.
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
@@ -675,3 +683,42 @@ changing any of them.
     `FROM` line: a fallback to a version written in the module would work
     perfectly and restore exactly the invisible constant this replaces.
     (issue #235)
+
+33. **`scan.yml` has no `pull_request` trigger, uses no third-party action, and
+    passes `--ignore-unfixed`. All three look like something left out.**
+    The scan runs on a clock against the *published* image, because `ci.yml`
+    pushes nothing on a pull request — a scan there would examine an artifact
+    with no users while the one with eleven million pulls went unexamined — and
+    because a red would never be attributable to the diff: `ci.yml` builds only
+    what the tree contains, so a pull request touching `run`, a fixture or the
+    README cannot introduce a Debian CVE, and its author holds no lever, the
+    remedy being a base bump `dependabot.yml` deliberately keeps out of
+    auto-merge. `lint.yml`'s header already states the rule this follows —
+    an unpinnable input must not fail somebody's unrelated pull request — and a
+    vulnerability database is that input by construction, since pinning it is
+    the same as not running the scan. Promoting this to a required check means
+    answering that, not assuming it.
+    Trivy is a checksummed release download rather than
+    `aquasecurity/trivy-action` because that wrapper was compromised on
+    2026-03-19, when 76 of its 77 version tags were force-pushed to a
+    credential stealer — a tag pin would not have helped, and the job needs no
+    checkout, no buildx and no QEMU, so it costs one `curl` to skip the
+    dependency entirely. Nothing bumps that pin, and unusually little is lost
+    by that: the database is fetched fresh on every run and is what carries the
+    signal.
+    `--ignore-unfixed` is what makes the result mean anything. Without it the
+    job reports around 290 findings Debian has assessed as not warranting a
+    stable update and nobody here can close. The largest single group of them,
+    68 of 287 rows when this was written, is perl -- in the image only so the
+    manually-invoked `qshape` keeps working (invariant 25), and executed by no
+    relaying container. With it, a red run
+    says exactly one thing: Debian shipped a fix the published image lacks.
+    It is expected to be green — it was when it was written, `trivy` and
+    `grype` both reporting zero fixable findings and `apt-get -s full-upgrade`
+    inside the published image agreeing.
+    The `no-cache` dispatch input on `ci.yml` is the other half and does not
+    stand alone: the apt install is unversioned, so a build resolves current
+    archive versions, but `cache-from`/`cache-to` make that layer a cache hit
+    until the `FROM` line moves. Without the input, the only answer to a
+    finding is to wait two to three weeks for the next `trixie-<date>-slim`
+    tag. (issue #269)

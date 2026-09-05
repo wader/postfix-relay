@@ -7,6 +7,22 @@ on:
     tags:
       - '*'
   pull_request:
+  # The remediation lever for a scan.yml finding, and the only way to move the
+  # image's package set without editing the Dockerfile.
+  #
+  # The apt install below is unversioned, so a build resolves every package to
+  # whatever the archive has that day -- but only when it actually runs. With
+  # cache-from/cache-to below, that layer is a cache hit until the FROM line
+  # changes, so merging anything else and rebuilding master republishes the
+  # same packages. Ticking this discards the cache, which re-resolves the
+  # install closure against the archive and picks up a Debian fix in minutes
+  # instead of waiting two to three weeks for the next trixie-<date>-slim tag.
+  workflow_dispatch:
+    inputs:
+      no-cache:
+        description: "Rebuild without the layer cache"
+        type: boolean
+        default: false
 
 # A new push makes the images an in-flight run would produce obsolete, except
 # on master where the run publishes latest.
@@ -77,6 +93,9 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Null on every trigger but workflow_dispatch, and false is what the
+          # action wants to see then.
+          no-cache: ${{ inputs.no-cache || false }}
       -
         name: Build and push branch or test PR
         if: github.ref != 'refs/heads/master'
@@ -90,3 +109,4 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache: ${{ inputs.no-cache || false }}
