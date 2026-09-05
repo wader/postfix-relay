@@ -11,9 +11,12 @@
 # "Pytest (arm/v7, emulated)", "Event File", "Test Results" and "ShellCheck";
 # "ci", "test" and "lint" are workflows and never report a check of their own.
 #
-# "Pytest (arm/v7, emulated)" does not run on a pull request unless it is
-# labelled "test-emulated", which is nearly all of them, so it is not a
-# candidate for the required list whatever github makes of a skipped check.
+# All seven run on every pull request now. "Pytest (arm/v7, emulated)" was not
+# a candidate while it sat behind a "test-emulated" label, because a required
+# check that is skipped gates on a run that did not happen; #273 removed the
+# label. Whether it is required is a ruleset setting this file cannot make:
+# auto-merge waits for what the ruleset names and for nothing else, so a red
+# emulated check stops a minor or patch update only once it is added there.
 
 name: Dependabot auto-merge
 

@@ -796,10 +796,9 @@ POSTFIX_RELAY_IMAGE=postfix-relay:test-armv7 POSTFIX_RELAY_ARCH=arm \
 CI runs the whole suite on `amd64` and on `arm64`, both natively. There is no
 `arm/v7` runner, so that image is emulated and only the handful of tests
 marked `smoke` run against it -- it starts, reports healthy, relays a message,
-and has no `postsrsd` -- on `master`, on a manual run, or on a pull request
-labelled `test-emulated` before its next push. Emulation is slow enough that
-the rest is not worth its minutes, and every wait in the suite is measured
-against a native run.
+and has no `postsrsd`. That runs on every pull request, like the two native
+runs. Emulation is slow enough that the rest is not worth its minutes, and
+every wait in the suite is measured against a native run.
 
 | File | What it covers |
 | --- | --- |
