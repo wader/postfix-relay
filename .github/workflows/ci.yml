@@ -133,6 +133,38 @@ jobs:
         env:
           DOCKER_REPO: "${{ secrets.DOCKER_REPO }}"
 
+      - name: Check the published manifest lists every architecture built
+        # This job pulls the entry of the manifest list that matches its own
+        # runner, and the arm64 one its own, so between them an entry that went
+        # missing or came back mislabelled leaves both green while a "docker
+        # pull" on the architecture that lost it fails or fetches something
+        # else. The list is the only place all three are visible at once, and
+        # imagetools reads it straight from the registry, so this costs a
+        # request and runs before anything is pulled.
+        #
+        # "linux/arm64", not the "linux/arm64/v8" the build asks for: v8 is
+        # arm64's default variant and buildx drops it when it writes the
+        # manifest, while arm/v7 keeps its variant because armhf has no
+        # default. That is what this build publishes, read off the manifest
+        # rather than assumed -- manifests written by other tooling do carry
+        # the "/v8". The entries skipped here are the provenance attestations
+        # buildx attaches to a pushed build: they carry platform
+        # "unknown/unknown" and are not architectures. Keep the list in step
+        # with the "platforms:" above.
+        env:
+          TAG: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+        run: |
+          expected="linux/amd64 linux/arm/v7 linux/arm64"
+          published=$(docker buildx imagetools inspect --raw "${TAG}" |
+            jq -r '.manifests[] | select(.platform.os != "unknown") | .platform |
+                   .os + "/" + .architecture + (if .variant then "/" + .variant else "" end)' |
+            sort | tr '\n' ' ' | sed 's/ $//')
+          echo "published: ${published}"
+          if [ "${published}" != "${expected}" ] ; then
+            echo "::error::${TAG} lists ${published}, expected ${expected}"
+            exit 1
+          fi
+
       - name: Pull the published image
         # By tag and without a platform, which is what a user's docker does:
         # the daemon picks the entry of the manifest list that matches this
