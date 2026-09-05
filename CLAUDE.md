@@ -49,8 +49,9 @@ why merge commits name someone else's namespace.
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
-| `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment is also where the check names are recorded. |
+| `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests` for the mailpit anchor. |
+| `.github/rulesets/master.json` | The `master` ruleset in github's export/import form: the four required status checks and nothing else. Conditioned on `~DEFAULT_BRANCH` rather than a literal `refs/heads/master`, so renaming the default branch does not quietly stop gating it. Nothing in the tree reads the file — it is the record that makes "CI blocks a bad pull request" checkable instead of believed, and it is what gets imported under Settings > Rules. |
 
 There is no `CONTRIBUTING.md`, no linter *config* of any kind — `lint.yml`
 passes its one flag on the command line — and no per-file license header — see
@@ -256,10 +257,35 @@ Notes a contributor will hit:
 - **Required checks match the job's `name:`**, never the workflow name and
   never the job key. Both `ci.yml` and `test.yml` still key their job `docker`;
   commit `f148d33` added the display names precisely because both reported a
-  check called "docker". Which checks are actually *required* lives in a
-  repository ruleset, not in this tree — the header comment in
-  `dependabot-auto-merge.yml` records the candidate names and explicitly rules
-  the emulated job out of the list.
+  check called "docker". Which checks are actually *required* is
+  `.github/rulesets/master.json`, an export of the `master` ruleset in the form
+  github's "Import a ruleset" takes and re-exports, so what gates a merge can be
+  diffed against the setting rather than taken on trust. Four are required:
+  **Build Image**, **Pytest**, **Pytest (arm64)** and **ShellCheck**. Renaming a
+  job means editing that file in the same commit — no check catches that drift,
+  and a required context naming a job that no longer reports blocks every pull
+  request until someone with admin rights notices.
+- **Three of the seven checks are deliberately not required**, and the reasons
+  are the point of writing the list down. **Test Results** is published by
+  `test-results.yml` on a `workflow_run` whose job carries
+  `if: conclusion == 'success' || conclusion == 'failure'`, and `test.yml`
+  cancels in-flight runs on every ref but `master` — so a push that supersedes a
+  run leaves that job *skipped*, which github counts as a satisfied required
+  check. A check that can pass by not running is the false assurance this list
+  exists to remove, and its verdict is derived anyway: it republishes the junit
+  files **Pytest** already failed on. **Event File** uploads an artifact and
+  reaches no verdict at all. **Pytest (arm/v7, emulated)** does not run on a
+  pull request unless it is labelled `test-emulated`, which nearly none are; the
+  header comment in `dependabot-auto-merge.yml` ruled it out first.
+- **The ruleset carries that one rule and no bypass actors.**
+  `strict_required_status_checks_policy` is false, so a branch does not have to
+  be brought up to date with `master` before it merges — with dependabot
+  auto-merge on, requiring it would re-run every open branch on each merge for a
+  repository whose pull requests do not touch each other. Force-push, deletion,
+  required-review and required-pull-request rules are all absent on purpose:
+  recording what already gates a merge is one thing, and changing the policy is
+  another. Each `context` omits `integration_id`, so which app may report a
+  check is settled in the import dialog rather than by an id pinned here.
 - **The pytest step has `timeout-minutes: 10`** inside a 20-minute job (25/45
   for the emulated one). The job timeouts are backstops: a cancelled job skips
   the upload step, so the bound expected to fire is the step's. Every wait in
