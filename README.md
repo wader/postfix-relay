@@ -814,10 +814,9 @@ POSTFIX_RELAY_IMAGE=mwader/postfix-relay:latest POSTFIX_RELAY_IMAGE_PUBLISHED=1 
 CI runs the whole suite on `amd64` and on `arm64`, both natively. There is no
 `arm/v7` runner, so that image is emulated and only the handful of tests
 marked `smoke` run against it -- it starts, reports healthy, relays a message,
-and has no `postsrsd` -- on `master`, on a manual run, or on a pull request
-labelled `test-emulated` before its next push. Emulation is slow enough that
-the rest is not worth its minutes, and every wait in the suite is measured
-against a native run.
+and has no `postsrsd`. That runs on every pull request, like the two native
+runs. Emulation is slow enough that the rest is not worth its minutes, and
+every wait in the suite is measured against a native run.
 
 All of that tests an image built from the tree. Every push to `master` also
 publishes `latest`, and what reaches the registry is built by buildx rather
