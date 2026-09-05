@@ -820,7 +820,8 @@ postfix setting.
 
 Set `POSTFIX_RELAY_IMAGE` to run against an image that is already built
 instead of building one. It is taken only for an architecture this machine
-cannot build, which is the whole reason it exists: building from the
+cannot build, or for the image that was published — between them the whole
+reason it exists: building from the
 `Dockerfile` is what makes the suite test the tree it is run in, and naming an
 image it could have built is refused rather than quietly testing whatever was
 left in the image store. Building one needs the emulators registered and a
@@ -863,9 +864,17 @@ else pulls it -- and the same smoke tests are run against it. Its manifest is
 read too, and the push fails if it does not list all three architectures that
 were built: each half of the check pulls the entry for its own architecture,
 so the one with no runner is only visible there. Only then is `latest` moved
-onto that image. It is the only check that looks at the image users actually
-pull, and it runs before they can pull it: an image that does not come up
-leaves `latest` where it was.
+onto that image. It is the only check that looks at what a push to `master`
+publishes, and it runs before anyone can pull it: an image that does not come
+up leaves `latest` where it was. The upgrade tests above reach the registry
+too, but for a released tag, which is a different question.
+
+A release is the same image again rather than another one. Pushing a version
+tag builds nothing: the commit it names was on `master` first, so its image is
+already in the registry, already pulled back and smoke-tested, and the version
+tags are pointed at it. So `1.2.18` and the `latest` it was cut from are the
+same bytes, and a tag on a commit `master` never published fails rather than
+releasing something no check has seen.
 
 | File | What it covers |
 | --- | --- |

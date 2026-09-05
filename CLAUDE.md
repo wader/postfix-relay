@@ -46,7 +46,7 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create` — after checking the commit is still `master`'s head, since master runs are not cancelled and two of them would otherwise race to write the tag. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
+| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's — never `latest`, and on a tag ref nothing at all: a release builds nothing and instead points the version tags at the `sha-<commit>` image `master` already published and verified. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create` — after checking the commit is still `master`'s head, since master runs are not cancelled and two of them would otherwise race to write the tag. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error run healthcheck` — the only threshold the two scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
@@ -292,17 +292,31 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 request: they are `needs: docker` and `master` only, because what they check is
 the publication **Build Image** makes there. Each pulls that image from the
 registry the way a user would and runs `pytest -m smoke` against it — the only
-checks in the tree that look at the artefact on the registry rather than at one
-built from the tree. (issue #266) They pull it by *digest*, not by tag, and
+checks that look at what a push to `master` published rather than at an image
+built from the tree. They are not alone in reaching the registry:
+`tests/test_upgrade.py` pulls a *released* tag, which is a different question
+(see 33). (issue #266) They pull it by *digest*, not by tag, and
 that is the whole of the arrangement below: what the build pushes is reachable
 under `sha-<commit>` and its digest, `latest` is not written by the build at
 all, and **Publish latest** — a fourth job, `needs` on all three — moves the
 tag onto that digest afterwards. So a failure here is no longer a report on an
-image users are already pulling: the tag stays where it was. (issue #272) The amd64 one carries one step the
-other does not: each job pulls the entry of the manifest list matching its own
-runner, so a missing or mislabelled entry would leave both green while the
-architecture that lost it fails to pull at all — that step reads the list
-itself. (issue #284)
+image users are already pulling: the tag stays where it was. (issue #272) The
+amd64 one carries one step the other does not: each job pulls the entry of the
+manifest list matching its own runner, so a missing or mislabelled entry would
+leave both green while the architecture that lost it fails to pull at all —
+that step reads the list itself. (issue #284)
+
+A release tag reaches the same digest by a shorter road: it builds nothing.
+The commit a tag names has been on `master` first in every release this
+repository has cut, so its image is already in the registry under
+`sha-<commit>`, already pulled back and smoke-tested; **Build Image**'s last
+step copies that manifest onto the version tags with `imagetools`, the way
+**Publish latest** copies it onto `latest`. Rebuilding was the defect: the
+`Dockerfile` pins the Debian base by date but the `apt install` under it is
+unversioned, so a tag cut weeks after the merge resolved a package set no
+check had ever started, and none of the three jobs above look at a tag ref.
+The copy also refuses a tag on a commit `master` never published, which is
+the one thing nothing checked before.
 
 **Image Scan** does not run on a pull request either, and for a reason of its
 own rather than a scheduling one: `scan.yml` carries no `pull_request` trigger
@@ -416,6 +430,25 @@ Notes a contributor will hit:
   correct behaviour, marked `xfail(strict=True)` with its issue. There are no
   current instances, and `xfail_strict` is not set in `pytest.ini`, so
   `strict=True` has to be written on each marker.
+- **Opening the issue or the pull request.** The integration a Claude session
+  here authenticates through can read this repository but cannot write to it:
+  creating an issue, creating a pull request and commenting on either all come
+  back `403 Resource not accessible by integration`, while `git push` to a
+  branch on a fork works. That is what issue #191 is about, and until it is
+  settled an agent cannot open the issue or the pull request its own change
+  needs. What it can do is push the branch and hand a person the link that
+  opens the form already filled in — `issues/new?title=…&body=…` for an issue,
+  `compare/master...<fork-owner>:<repo>:<branch>?expand=1` for a pull request.
+  Those links belong in the reply, written out in full: a file to download is
+  one step further from the browser, which is the one place they can be used.
+  Comments have no such link, so that case is the issue's own URL plus the text
+  to paste.
+- **Text bound for GitHub is not wrapped.** Issue bodies, pull request bodies
+  and comments go in as long lines and let GitHub reflow them to whatever width
+  the reader has; wrapped at 79 columns the way this file is, they render as a
+  narrow column down the left of a wide page. The wrapping this repository uses
+  is for what is *committed* — this file, the README, commit messages, the
+  comments inside `run` and the workflows — and stops at the edge of the tree.
 - **Docs.** User-visible behaviour goes in `README.md`. If a change makes the
   README wrong, the change is not finished. The same holds for this file, and
   it is the half that gets forgotten: it describes the tree, so a change to
@@ -803,10 +836,12 @@ changing any of them.
     edited, and it is what deployments actually run. The cost is that it lags
     the tree by whatever has been merged since: SRS landed after 1.2.17, so
     the released image never wrote a secret, and the SRS test skips itself
-    saying so instead of passing. It decides that by reading the released
-    image's own `run` for `POSTSRSD_`, not by comparing version numbers, so it
-    starts running of its own accord the first time the anchor moves past the
-    release that adds the feature. And `upgrade_from_image` pulls for the
+    saying so instead of passing. It decides that by asking the released image
+    for a `postsrsd` binary, not by comparing version numbers, so it starts
+    running of its own accord the first time the anchor moves past the release
+    that adds the feature. The binary and not `POSTSRSD_` in its `run`: that
+    string is in the script on every architecture, and on armhf the branch
+    holding it is the one refusing to start for want of the package. And `upgrade_from_image` pulls for the
     platform of the image under test rather than the machine's: wherever
     `POSTFIX_RELAY_IMAGE` names an image this run did not build — a foreign
     architecture, or the published one 30 now also admits — the machine's own
@@ -832,7 +867,10 @@ changing any of them.
     2026-03-19, when 76 of its 77 version tags were force-pushed to a
     credential stealer — a tag pin would not have helped, and the job needs no
     checkout, no buildx and no QEMU, so it costs one `curl` to skip the
-    dependency entirely. Nothing bumps that pin, and unusually little is lost
+    dependency entirely -- and having no checkout is why the two `gh` steps set
+    `GH_REPO`: `gh` resolves the repository it acts on from `--repo`, then that
+    variable, then the working directory's git remotes, and with nothing
+    checked out there are none. Nothing bumps that pin, and unusually little is lost
     by that: the database is fetched fresh on every run and is what carries the
     signal.
     The **Verify Published Image** jobs in `ci.yml` look at the same artefact
