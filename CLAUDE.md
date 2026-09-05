@@ -895,3 +895,20 @@ changing any of them.
     until the `FROM` line moves. Without the input, the only answer to a
     finding is to wait two to three weeks for the next `trixie-<date>-slim`
     tag. (issue #269)
+
+35. **The trailing underscore in `${!POSTFIX_*}` is what keeps the two
+    `postconf` loops apart.** Bash's `${!prefix*}` is a literal prefix test on
+    variable names, so `POSTFIX_` demands `_` at offset 7 where
+    `POSTFIXMASTER_` has `M`; that character, and nothing else, is why the
+    `POSTFIX_` loop does not also swallow every `POSTFIXMASTER_` variable.
+    Dropping it feeds them to `postconf -e` as well, and the offsets are
+    coupled to the spelling too — `${e:8}` then cuts one character further in,
+    so `POSTFIXMASTER_submission__inet` lands in `main.cf` as
+    `ASTER_submission__inet`. Nothing loud happens: the service is still added
+    correctly by the second loop, the container comes up healthy and relays,
+    and the only trace is one `postconf: warning: unused parameter`. What
+    makes it more than untidy is invariant 17 — a `POSTFIXMASTER_<name>_FILE`
+    secret is resolved *before* these loops, so the same edit writes a
+    resolved credential into `main.cf`.
+    `tests/test_config.py` asserts a `POSTFIXMASTER_` variable leaves no trace
+    there, which fails under that edit and passes today. (issue #314)
