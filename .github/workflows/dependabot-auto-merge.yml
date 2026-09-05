@@ -11,8 +11,10 @@
 # Required checks are matched by job name, not by workflow name. The names
 # that exist are "Build Image", "Pytest", "Pytest (arm64)",
 # "Pytest (arm/v7, emulated)", "Event File", "Test Results", "ShellCheck",
-# "Verify Published Image (amd64)" / "(arm64)" and "Publish latest"; "ci",
-# "test" and "lint" are workflows and never report a check of their own.
+# "Ruff", "Verify Published Image (amd64)" / "(arm64)" and "Publish latest";
+# "ci", "test" and "lint" are workflows and never report a check of their own,
+# and one workflow can report more than one -- "lint" reports both "ShellCheck"
+# and "Ruff".
 #
 # "Pytest (arm/v7, emulated)" runs on every pull request since #273, and is
 # still not in the required list: its verdict comes from an emulator, where a
