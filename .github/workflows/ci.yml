@@ -90,3 +90,87 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  verify_published:
+    name: "Verify Published Image (${{ matrix.arch }})"
+    # The build above is the only thing that puts an image in front of users,
+    # and nothing here looked at what came out of it: the suite builds its own
+    # image with the local daemon, so a broken manifest, an architecture that
+    # builds but does not run, or a registry-side problem would pass every
+    # check this repository has. This pulls what was just published, the way a
+    # user pulls it, and runs the smoke tests against it.
+    #
+    # Only where there was a publication to check: the step above pushes latest
+    # on master and nowhere else. Nothing is rolled back if this fails -- the
+    # tag is already out -- but a red check on master is the difference between
+    # knowing and not.
+    needs: docker
+    if: github.ref == 'refs/heads/master'
+    strategy:
+      # One architecture being broken says nothing about the other, and hearing
+      # about both is the whole point of running two jobs.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    # Both are native runners. The third architecture, arm/v7, has none and
+    # would have to be emulated for another 25 minutes after every push to
+    # master; test.yml already runs the same smoke tests against an arm/v7
+    # image it builds, which is where that one is answered for.
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Helper for custom repo name
+        id: reponame
+        # Repeated rather than taken as an output of the job above: a job output
+        # holding a secret is redacted on the runner and never reaches the job
+        # that reads it, which would leave this pulling an empty repository name.
+        run: |
+          if [ "${DOCKER_REPO}" != "" ]; then
+            echo "DOCKER_REPO=${DOCKER_REPO}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "DOCKER_REPO=${{ github.repository }}" >> "${GITHUB_OUTPUT}"
+          fi
+        env:
+          DOCKER_REPO: "${{ secrets.DOCKER_REPO }}"
+
+      - name: Pull the published image
+        # By tag and without a platform, which is what a user's docker does:
+        # the daemon picks the entry of the manifest list that matches this
+        # runner, and an entry that is missing or mislabelled fails here rather
+        # than in a test. A master run that publishes while this one is pulling
+        # would leave this testing the newer image, which its own run tests too.
+        run: docker pull "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+
+      - name: Setup python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Run the smoke tests
+        # Not the whole suite: test.yml already runs that against the image
+        # built from this same commit on both of these architectures, so what
+        # is left to learn is whether the artefact that was published starts
+        # and relays. That is what the smoke tests say (see pytest.ini).
+        #
+        # No junit here. The reporter in test-results.yml follows the "test"
+        # workflow, and this job's own verdict is the signal.
+        timeout-minutes: 10
+        env:
+          POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          # This image is the runner's own architecture, which the fixture
+          # otherwise refuses for looking like a stale local build.
+          POSTFIX_RELAY_IMAGE_PUBLISHED: "1"
+          # And it still has to be the architecture this job meant to pull.
+          POSTFIX_RELAY_ARCH: "${{ matrix.arch }}"
+        run: pytest -m smoke
