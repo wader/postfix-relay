@@ -447,13 +447,23 @@ actually handles mail is not root:
 | Process | Runs as |
 | --- | --- |
 | the start-up script, `master`, `rsyslogd` | `root` |
+| `saslauthd`, when `SASL_Passwds` is set | `root` |
 | `smtpd`, `cleanup`, `qmgr`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
 | `opendkim` | `opendkim` |
 | `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
 
-The root processes supervise and log; they do not parse untrusted input. Most
-of what docker grants the container by default is therefore unused and can be
-taken away:
+As the relay ships, the root processes supervise and log; they do not parse
+untrusted input. Setting `SASL_Passwds` adds one that does: `saslauthd` runs as
+root and checks the username and password an SMTP client sent, through PAM.
+That is what it is for, and it is why the directory holding its socket is
+created `root:sasl` mode `710` rather than left at the world-writable mode
+`saslauthd` gives the socket itself -- an unauthenticated password check
+reachable by every uid in the container would be an oracle for guessing at the
+passwords. Nothing to configure, but worth knowing before deciding what a
+relay of yours may do.
+
+Either way, most of what docker grants the container by default is unused and
+can be taken away:
 
 ```
 cap_drop:
