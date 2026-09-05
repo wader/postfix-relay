@@ -275,7 +275,7 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 | **Ruff** | `lint.yml` | The same shape, one job over: downloads ruff at the version and sha256 pinned in the job's `env:`, then `ruff check --no-cache --select F tests`. Seconds, no docker. See [Lint](#lint) for why that selection and not a wider one, and why it is spelled out rather than inherited. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
-An eighth, **Pytest (arm/v7, emulated)**, runs only on `master`, on a manual
+**Pytest (arm/v7, emulated)** runs only on `master`, on a manual
 dispatch, or on a pull request labelled `test-emulated` — and the label is read
 from the event that started the run, so it takes effect on the *next* push to
 the branch. It pins the QEMU binfmt image, builds `linux/arm/v7`, and runs
@@ -301,12 +301,11 @@ Notes a contributor will hit:
   **Build Image**, **Pytest**, **Pytest (arm64)**, **Ruff** and **ShellCheck**.
   A workflow can report more than one of them — `lint.yml` reports the last
   two. Renaming a job means editing that file in the same commit — no check
-  catches that drift,
-  and a required context naming a job that no longer reports blocks every pull
-  request until someone with admin rights notices.
-- **Three checks a pull request can report are deliberately not required**, and
-  the reasons are the point of writing the list down. **Test Results** is
-  published by `test-results.yml` on a `workflow_run` whose job carries
+  catches that drift, and a required context naming a job that no longer
+  reports blocks every pull request until someone with admin rights notices.
+- **Every check that is not on that list is off it for a reason**, and the
+  reasons are the point of writing the list down. **Test Results** is published by
+  `test-results.yml` on a `workflow_run` whose job carries
   `if: conclusion == 'success' || conclusion == 'failure'`, and `test.yml`
   cancels in-flight runs on every ref but `master` — so a push that supersedes a
   run leaves that job *skipped*, which github counts as a satisfied required
@@ -315,7 +314,10 @@ Notes a contributor will hit:
   files **Pytest** already failed on. **Event File** uploads an artifact and
   reaches no verdict at all. **Pytest (arm/v7, emulated)** does not run on a
   pull request unless it is labelled `test-emulated`, which nearly none are; the
-  header comment in `dependabot-auto-merge.yml` ruled it out first.
+  header comment in `dependabot-auto-merge.yml` ruled it out first. And the two
+  **Verify Published Image** jobs have nothing to report on a branch at all:
+  what they check is the image a push to `master` published, so on a pull
+  request they are skipped by the `if:` that keeps them off it.
 - **The ruleset carries that one rule and no bypass actors.**
   `strict_required_status_checks_policy` is false, so a branch does not have to
   be brought up to date with `master` before it merges — with dependabot
