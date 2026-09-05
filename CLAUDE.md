@@ -751,10 +751,12 @@ changing any of them.
     edited, and it is what deployments actually run. The cost is that it lags
     the tree by whatever has been merged since: SRS landed after 1.2.17, so
     the released image never wrote a secret, and the SRS test skips itself
-    saying so instead of passing. It decides that by reading the released
-    image's own `run` for `POSTSRSD_`, not by comparing version numbers, so it
-    starts running of its own accord the first time the anchor moves past the
-    release that adds the feature. And `upgrade_from_image` pulls for the
+    saying so instead of passing. It decides that by asking the released image
+    for a `postsrsd` binary, not by comparing version numbers, so it starts
+    running of its own accord the first time the anchor moves past the release
+    that adds the feature. The binary and not `POSTSRSD_` in its `run`: that
+    string is in the script on every architecture, and on armhf the branch
+    holding it is the one refusing to start for want of the package. And `upgrade_from_image` pulls for the
     platform of the image under test rather than the machine's: wherever
     `POSTFIX_RELAY_IMAGE` names an image this run did not build — a foreign
     architecture, or the published one 30 now also admits — the machine's own
