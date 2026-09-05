@@ -20,10 +20,11 @@ IMAGE_TAG = "postfix-relay:test"
 # which is every run on the machine it is meant for, the suite builds the image
 # as it always has.
 #
-# Only accepted for an architecture this machine cannot build, which is the
-# whole of the case for having it. Building from the Dockerfile is what makes
-# the suite test the tree it is run in rather than whatever was left in the
-# image store, and that is not worth giving up anywhere it can still be done.
+# Only accepted for an architecture this machine cannot build, or for the image
+# that was published (see below): between them that is the whole of the case for
+# having it. Building from the Dockerfile is what makes the suite test the tree
+# it is run in rather than whatever was left in the image store, and that is not
+# worth giving up anywhere it can still be done.
 PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
 
 # What that image has to be, as docker reports it: "arm" for the arm/v7 image,
@@ -31,6 +32,14 @@ PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
 # and got the runner's own would pass every test it ran and say nothing, which
 # is the one way an emulated run can be worse than no run at all.
 EXPECTED_ARCHITECTURE = os.environ.get('POSTFIX_RELAY_ARCH')
+
+# The other image the suite cannot build for itself: the one buildx pushed to
+# the registry, which is what a user pulls and the only thing no check here
+# looks at otherwise. It is the architecture of the runner that pulls it, so
+# the refusal below would turn it down for looking like a stale local build.
+# This is how a caller says it is not one, and it is the only thing that lifts
+# that refusal: a run that names a leftover image by accident still gets it.
+PUBLISHED_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE_PUBLISHED')
 
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
@@ -41,19 +50,22 @@ def postfix_image(tmp_path_factory):
     """The image under test, built once for the whole run.
 
     Every test reaches the image through here, so pointing this at a prebuilt
-    one is enough to run the suite against an image the suite did not build.
+    one is enough to run the suite against an image the suite did not build --
+    a foreign architecture, or the image that was published.
     """
     if PREBUILT_IMAGE:
         client = docker.from_env()
         image = client.images.get(PREBUILT_IMAGE)
         architecture = image.attrs['Architecture']
 
-        if architecture == client.version()['Arch']:
+        if not PUBLISHED_IMAGE and architecture == client.version()['Arch']:
             raise AssertionError(
                 f"POSTFIX_RELAY_IMAGE names a {architecture} image, which this "
                 "machine can build: the suite builds from the Dockerfile so "
                 "that what it tests is what is in the tree. It takes a "
-                "prebuilt image only where the docker builder cannot make one.")
+                "prebuilt image only where the docker builder cannot make one, "
+                "or where POSTFIX_RELAY_IMAGE_PUBLISHED says the image named is "
+                "the one that was published rather than a build of the tree.")
 
         if EXPECTED_ARCHITECTURE and architecture != EXPECTED_ARCHITECTURE:
             raise AssertionError(

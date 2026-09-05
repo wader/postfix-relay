@@ -39,13 +39,13 @@ why merge commits name someone else's namespace.
 | `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py` and `test_ruleset.py`, and by three of the four fixture modules. `file_missing` is defined and never called. |
 | `tests/requirements.txt` | Seven pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `pyyaml`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not; `pyyaml` is there for `test_ruleset.py` alone. |
 | `tests/fixtures/shared_network.py` | Session-scoped `shared_network`: a testcontainers `Network()` with a generated, labelled name — not a fixed one, so an interrupted run leaves nothing for the next one to collide with. |
-| `tests/fixtures/postfix.py` | Six fixtures: `postfix_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH`. |
+| `tests/fixtures/postfix.py` | Six fixtures: `postfix_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH` / `POSTFIX_RELAY_IMAGE_PUBLISHED`. |
 | `tests/mailpit.Dockerfile` | Not built and no part of any image. One `FROM axllent/mailpit:<tag>` line, so that Dependabot's docker ecosystem — whose file fetcher matches any name containing `dockerfile` — can offer a bump to the test peer. `tests/fixtures/mailpit.py` reads the tag back out of it. |
 | `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, whose image is read from `tests/mailpit.Dockerfile` rather than written here: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. |
+| `.github/workflows/ci.yml` | `name: ci`. Two jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls the tag that was just pushed and runs `pytest -m smoke` against it. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
@@ -90,7 +90,9 @@ tests/test_*.py
                                           ├── docker build .  -> postfix-relay:test
                                           │      -> Dockerfile -> run, healthcheck
                                           └── or POSTFIX_RELAY_IMAGE, but only for
-                                              an architecture this host cannot build
+                                              an architecture this host cannot build,
+                                              or with POSTFIX_RELAY_IMAGE_PUBLISHED
+                                              for the image that was published
 
          mailpit (function) ──> mailpit_container (session) ──> mailpit_image (session)
          mailpit_factory (function) ──────────────────────────────┘
@@ -249,11 +251,19 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 | **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error run healthcheck`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
-A seventh, **Pytest (arm/v7, emulated)**, runs only on `master`, on a manual
+**Pytest (arm/v7, emulated)** runs only on `master`, on a manual
 dispatch, or on a pull request labelled `test-emulated` — and the label is read
 from the event that started the run, so it takes effect on the *next* push to
 the branch. It pins the QEMU binfmt image, builds `linux/arm/v7`, and runs
 `pytest -m smoke -n0`.
+
+**Verify Published Image (amd64)** and **(arm64)** do not run on a pull request
+either: they are `needs: docker` and `master` only, because what they check is
+the publication the **Build Image** step makes there. Each pulls that tag the
+way a user would and runs `pytest -m smoke` against it — the only check in the
+tree that looks at the artefact on the registry rather than at one built from
+the tree. Nothing is rolled back when one fails; the tag is already out, and
+the check is what says so. (issue #266)
 
 Notes a contributor will hit:
 
@@ -269,8 +279,8 @@ Notes a contributor will hit:
   is there to catch: a required context naming a job that no longer reports
   blocks every pull request until someone with admin rights notices, and that
   test fails on the rename instead.
-- **Three of the seven checks are deliberately not required**, and the reasons
-  are the point of writing the list down. **Test Results** is published by
+- **Every check that is not on that list is off it for a reason**, and the
+  reasons are the point of writing the list down. **Test Results** is published by
   `test-results.yml` on a `workflow_run` whose job carries
   `if: conclusion == 'success' || conclusion == 'failure'`, and `test.yml`
   cancels in-flight runs on every ref but `master` — so a push that supersedes a
@@ -280,7 +290,10 @@ Notes a contributor will hit:
   files **Pytest** already failed on. **Event File** uploads an artifact and
   reaches no verdict at all. **Pytest (arm/v7, emulated)** does not run on a
   pull request unless it is labelled `test-emulated`, which nearly none are; the
-  header comment in `dependabot-auto-merge.yml` ruled it out first.
+  header comment in `dependabot-auto-merge.yml` ruled it out first. And the two
+  **Verify Published Image** jobs have nothing to report on a branch at all:
+  what they check is the image a push to `master` published, so on a pull
+  request they are skipped by the `if:` that keeps them off it.
 - **The ruleset carries that one rule and no bypass actors.**
   `strict_required_status_checks_policy` is false, so a branch does not have to
   be brought up to date with `master` before it merges — with dependabot
@@ -550,7 +563,14 @@ changing any of them.
     *"configuration error at line N: unrecognized parameter"*. It is not the
     only name that has to stay out: any `OPENDKIM_<name>_FILE` would land there
     too, and does not only because `secretsFromFiles` unsets the `_FILE`
-    variable after reading it. That `unset` is part of this invariant.
+    variable after reading it. That `unset` is part of this invariant, and
+    `tests/test_secrets.py` now pins it: one test there asserts that a
+    `POSTFIX_<name>_FILE` leaves no `<name>_FILE` in `main.cf` and that a
+    `POSTFIXMASTER_` one draws no `postconf` fatal — the two prefixes where
+    losing the `unset` costs nothing but noise. The prefix where it costs the
+    whole file is this one, and the relay in that same file configured through
+    `OPENDKIM_DOMAINS_FILE` is what catches that: without the `unset` it does
+    not come up at all.
 
 16. **`dkimConfig` deletes `/etc/opendkim/KeyTable` and
     `/etc/opendkim/SigningTable` before rebuilding them**, because the loop
@@ -568,7 +588,7 @@ changing any of them.
     exactly five prefixes — `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`,
     `OPENDKIM_` and `POSTSRSD_`. `SASL_Passwds`, `POSTMASTER_ADDRESS` and the
     `RSYSLOG_*` variables have no `_FILE` form, and `tests/test_secrets.py`
-    names the same five.
+    exercises the same five.
 
 18. **The POSTMAP loop is wrapped in `shopt -s nullglob` / `shopt -u nullglob`,
     and chowns the table and everything `postmap` generated from it to
@@ -675,10 +695,16 @@ changing any of them.
 30. **`POSTFIX_RELAY_IMAGE` is refused for an architecture the local daemon
     could build**, and `POSTFIX_RELAY_ARCH`, when set, must match what docker
     reports for the image. Building from the `Dockerfile` is what makes the
-    suite test the tree it was run in; the escape hatch exists only for
-    `arm/v7`, and an emulated job that meant to test another architecture and
-    silently got the runner's own would pass everything and say nothing.
-    (commit `5abb242`)
+    suite test the tree it was run in; the escape hatch exists for `arm/v7`,
+    and an emulated job that meant to test another architecture and silently
+    got the runner's own would pass everything and say nothing.
+    (commit `5abb242`) The one thing that lifts that refusal is
+    `POSTFIX_RELAY_IMAGE_PUBLISHED`, which says the image named is the one that
+    was published and not a build of the tree — the published image is the
+    runner's own architecture, so the refusal would otherwise turn it down for
+    looking like whatever was left in the image store. It is a second named
+    case, not a general opt-out: `POSTFIX_RELAY_ARCH` still has to match, and
+    nothing else gets past. (issue #266)
 
 31. **Base-image bumping is Dependabot's, not `wader/bump`'s.** `Bumpfile`,
     `.github/workflows/bump.yml` and the `# bump:` directive on line 1 of the
