@@ -277,11 +277,13 @@ def test_a_quoted_local_part_is_relayed(postfix, mailpit):
 
     Read from what the relay handed to the next hop rather than from what the
     next hop did with it. Those are different questions, and only the first is
-    this image's: mailpit answers "553 5.1.3 The address is not a valid RFC
-    5321 address" to this recipient from v1.28.3 on, so asserting on the
-    stored message made the test a test of the peer, and pinned the suite to
-    a mailpit older than that. The peer is still asked for, so that this is a
-    real delivery attempt to a server that is there rather than a deferral.
+    this image's. That is also what keeps the assertion steady while the peer
+    changes its mind about the recipient: mailpit answered "553 5.1.3 The
+    address is not a valid RFC 5321 address" to it from v1.28.3 until the fix
+    in v1.31.1 (axllent/mailpit#731), which held the pin down for four minor
+    versions back when the assertion read the stored message. The peer is
+    still asked for, so that this is a real delivery attempt to a server that
+    is there rather than a deferral.
     """
     send(postfix, recipients=('"odd user"@example.com',), subject='quoted local part')
 

@@ -4,7 +4,9 @@
 # Requirements:
 # - "Allow auto-merge" enabled in the repository settings
 # - a ruleset on master with required status checks, otherwise auto-merge
-#   does not wait for CI and merges straight away
+#   does not wait for CI and merges straight away. The one this expects is
+#   committed as .github/rulesets/master.json, in the form github's
+#   "Import a ruleset" takes.
 #
 # Required checks are matched by job name, not by workflow name. The names
 # that exist are "Build Image", "Pytest", "Pytest (arm64)",
