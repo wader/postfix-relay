@@ -489,6 +489,10 @@ with them — being the one worth the trouble on a container that listens on a
 network. Relaying, signing, rewriting, the health check and a graceful stop all
 work with the set above, and a test checks that they do.
 
+If you think you have found a security bug in the image itself rather than in
+how it is configured, [SECURITY.md](SECURITY.md) says where to send it, and
+which of the things above are deliberate and therefore not bugs.
+
 Under `docker stack deploy` the `security_opt` line is dropped — swarm prints
 `Ignoring unsupported options: security_opt` and the container starts without
 `no-new-privileges`. The capability set above is passed through unchanged.
