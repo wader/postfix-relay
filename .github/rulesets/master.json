@@ -28,6 +28,9 @@
             "context": "Pytest (arm64)"
           },
           {
+            "context": "Ruff"
+          },
+          {
             "context": "ShellCheck"
           }
         ]

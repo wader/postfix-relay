@@ -48,14 +48,14 @@ why merge commits name someone else's namespace.
 | `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
-| `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
+| `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error run healthcheck` — the only threshold the two scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests` for the mailpit anchor. |
-| `.github/rulesets/master.json` | The `master` ruleset in github's export/import form: the four required status checks and nothing else. Conditioned on `~DEFAULT_BRANCH` rather than a literal `refs/heads/master`, so renaming the default branch does not quietly stop gating it. Nothing in the tree reads the file — it is the record that makes "CI blocks a bad pull request" checkable instead of believed, and it is what gets imported under Settings > Rules. |
+| `.github/rulesets/master.json` | The `master` ruleset in github's export/import form: the five required status checks and nothing else. Conditioned on `~DEFAULT_BRANCH` rather than a literal `refs/heads/master`, so renaming the default branch does not quietly stop gating it. Nothing in the tree reads the file — it is the record that makes "CI blocks a bad pull request" checkable instead of believed, and it is what gets imported under Settings > Rules. |
 
 There is no `CONTRIBUTING.md`, no linter *config* of any kind — `lint.yml`
-passes its one flag on the command line — and no per-file license header — see
-[Conventions](#conventions).
+passes both linters their selection on the command line — and no per-file
+license header — see [Conventions](#conventions).
 
 ## Dependency graph
 
@@ -181,8 +181,11 @@ until CI runs.
 ### Lint
 
 ```bash
-shellcheck -S error run healthcheck   # what CI runs; exits 0
-shellcheck run healthcheck            # everything, at the stock threshold
+shellcheck -S error run healthcheck        # what CI runs; exits 0
+shellcheck run healthcheck                 # everything, at the stock threshold
+
+ruff check --no-cache --select F tests     # what CI runs; exits 0
+ruff check --statistics --select ALL tests # everything ruff has, for reference
 ```
 
 `run` and `healthcheck` are the two scripts that go into the image, and
@@ -192,12 +195,6 @@ stone to a stricter one: it is the only one the scripts pass, and the findings
 between it and the default are either noise or deliberate. The third shell
 script in the tree, the hook under `.claude/`, is not gated: it is no part of
 what ships.
-
-There is still no linter *configuration* anywhere in the repo (no
-`.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
-`.flake8`, `.ruff.toml` or `.pre-commit-config.yaml`) and no in-file
-`# shellcheck disable=`, so nothing is suppressed: what the gate lets through,
-it lets through because of the threshold alone.
 
 With shellcheck 0.11.0, which is the version `lint.yml` pins:
 
@@ -230,12 +227,41 @@ as a snapshot; the pin in `lint.yml` is what keeps a release from moving them
 under an unrelated pull request. Nothing bumps that pin — moving to a newer
 shellcheck is a deliberate edit, the way a base-image suite change is.
 
+`tests/` is all the python in the tree, and `lint.yml` gates it at
+`--select F` — pyflakes — as the **Ruff** check. The same decision made twice:
+`F` is the rules that find code which cannot work rather than code someone
+would write differently, and it is what the suite passes with no edit to any
+`.py` file. The one worth naming is `F811`, a test function replaced by a later
+one of the same name — pytest collects the second, the first one's assertions
+never run, and nothing says so. What `F` does *not* buy is worth knowing too:
+a fixture nobody requests is invisible to every pyflakes-family tool, a helper
+whose signature drifted needs pylint, and `file_missing` — the one dead helper
+the tree actually has — is seen at no ruff selection at all, `ALL` included.
+(#268, which asked for the gate, names all three as the thing it would catch.)
+
+Widening is a deliberate edit here too, and it is not free: `E` is 62 `E501`s
+at ruff's 88 columns on a suite whose longest line has always been 102, `I`
+reorders the imports of sixteen files, and `ruff format` would rewrite nineteen
+of the twenty-three. None of that is a defect today. The selection is written
+out rather than left to ruff's default for the same reason the version is
+pinned: on this tree, unchanged, the default is two findings under ruff 0.15.8
+and twenty-eight under 0.16.6, while `--select F` is the same on both. Nothing
+bumps that pin either.
+
+There is still no linter *configuration* anywhere in the repo (no
+`.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
+`.flake8`, `.ruff.toml` or `.pre-commit-config.yaml`) and no in-file
+`# shellcheck disable=`, so nothing is suppressed: what the gates let through,
+they let through because of the threshold and the selection alone. The tree's
+one suppression is a `# noqa: BLE001` in `tests/test_smtp.py`, inert under
+`--select F` and written for a rule nothing has ever selected.
+
 ## What blocks a pull request
 
 Four workflow files carry a `pull_request` trigger, but `dependabot-auto-merge.yml`
 is a no-op for anything not opened by `dependabot[bot]` — its single job has no
 display `name:`, so on an ordinary pull request it appears as a skipped
-`auto-merge` check. The six that can actually fail are:
+`auto-merge` check. The seven that can actually fail are:
 
 | Check | From | What it does |
 | --- | --- | --- |
@@ -244,6 +270,7 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 | **Pytest (arm64)** | `test.yml` | The same, natively, on `ubuntu-24.04-arm`. |
 | **Event File** | `test.yml` | Uploads the triggering event payload for the reporter. |
 | **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error run healthcheck`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
+| **Ruff** | `lint.yml` | The same shape, one job over: downloads ruff at the version and sha256 pinned in the job's `env:`, then `ruff check --no-cache --select F tests`. Seconds, no docker. See [Lint](#lint) for why that selection and not a wider one, and why it is spelled out rather than inherited. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
 A seventh, **Pytest (arm/v7, emulated)**, runs only on `master`, on a manual
@@ -260,12 +287,14 @@ Notes a contributor will hit:
   check called "docker". Which checks are actually *required* is
   `.github/rulesets/master.json`, an export of the `master` ruleset in the form
   github's "Import a ruleset" takes and re-exports, so what gates a merge can be
-  diffed against the setting rather than taken on trust. Four are required:
-  **Build Image**, **Pytest**, **Pytest (arm64)** and **ShellCheck**. Renaming a
-  job means editing that file in the same commit — no check catches that drift,
+  diffed against the setting rather than taken on trust. Five are required:
+  **Build Image**, **Pytest**, **Pytest (arm64)**, **Ruff** and **ShellCheck**.
+  A workflow can report more than one of them — `lint.yml` reports the last
+  two. Renaming a job means editing that file in the same commit — no check
+  catches that drift,
   and a required context naming a job that no longer reports blocks every pull
   request until someone with admin rights notices.
-- **Three of the seven checks are deliberately not required**, and the reasons
+- **Three of the eight checks are deliberately not required**, and the reasons
   are the point of writing the list down. **Test Results** is published by
   `test-results.yml` on a `workflow_run` whose job carries
   `if: conclusion == 'success' || conclusion == 'failure'`, and `test.yml`
@@ -301,10 +330,13 @@ Notes a contributor will hit:
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
   still break without a change in this repo.
-- **ShellCheck is a gate, but a narrow one.** It fails only on shellcheck
-  errors in `run` and `healthcheck` — nothing about python, yaml, the
-  `Dockerfile` or the README is linted anywhere. Do not widen it as a side
-  effect of an unrelated change: `-S warning` fails on master today.
+- **Both linters are gates, but narrow ones.** **ShellCheck** fails only on
+  shellcheck errors in `run` and `healthcheck`; **Ruff** only on pyflakes
+  findings under `tests/`. Nothing about yaml, the `Dockerfile` or the README is
+  linted anywhere, and python outside `tests/` would not be either — the job
+  names the directory. Do not widen either as a side effect of an unrelated
+  change: `-S warning` fails on master today, and every ruff selection past `F`
+  costs edits to files that are not wrong.
 
 ## Conventions
 

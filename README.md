@@ -863,6 +863,23 @@ That threshold is the whole gate. Warnings and notes below it are left
 alone, some of them deliberately, so raising it would mean changing code
 that is already correct.
 
+The tests themselves are python, and pytest only reads the lines it runs, so
+they are linted the same way -- with [ruff](https://docs.astral.sh/ruff/), at
+the pyflakes rules:
+
+```bash
+ruff check --select F tests
+```
+
+Same idea as the threshold above: those are the rules that find code which
+cannot work, rather than code someone would write differently. A name that is
+not defined, an import nothing uses, a variable assigned and never read, and a
+test function silently replaced by a later one of the same name -- the last one
+being invisible in a pytest run, which simply collects the second definition
+and never reports the first. Style, import order and formatting are not
+checked, and widening the selection would mean changing code that is already
+correct.
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- LICENSE -->
