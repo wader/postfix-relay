@@ -11,8 +11,10 @@
 # Required checks are matched by job name, not by workflow name. The names
 # that exist are "Build Image", "Pytest", "Pytest (arm64)",
 # "Pytest (arm/v7, emulated)", "Event File", "Test Results", "ShellCheck",
-# "Verify Published Image (amd64)" / "(arm64)" and "Image Scan"; "ci", "test",
-# "lint" and "scan" are workflows and never report a check of their own.
+# "Ruff", "Verify Published Image (amd64)" / "(arm64)", "Publish latest" and
+# "Image Scan"; "ci", "test", "lint" and "scan" are workflows and never report
+# a check of their own, and one workflow can report more than one -- "lint"
+# reports both "ShellCheck" and "Ruff".
 #
 # "Pytest (arm/v7, emulated)" runs on every pull request since #273, and is
 # still not in the required list: its verdict comes from an emulator, where a
@@ -20,9 +22,9 @@
 # rather than blocking a merge. Requiring it means adding it to
 # .github/rulesets/master.json and importing that.
 #
-# The two "Verify Published Image" jobs are not candidates either, and for a
-# firmer reason: they check the image a push to master published, so they never
-# run on a pull request at all.
+# The two "Verify Published Image" jobs are not candidates either, nor is
+# "Publish latest", and for a firmer reason: they check -- and then tag -- the
+# image a push to master published, so they never run on a pull request at all.
 #
 # "Image Scan" is not a candidate for that same firmer reason and one of its
 # own. It runs on a schedule against the published image and has no

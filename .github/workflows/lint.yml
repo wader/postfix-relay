@@ -10,7 +10,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
-# What this gate is, and what it deliberately is not.
+# What the ShellCheck gate is, and what it deliberately is not.
 #
 # It runs shellcheck at "-S error", which is the threshold the two scripts pass
 # today and the only one that does: "-S warning" fails on the SC2034 in
@@ -27,11 +27,11 @@ concurrency:
 # stricter threshold: raising it would mean changing code that is already
 # correct.
 #
-# shellcheck is pinned and checksummed rather than taken from the runner image,
-# and nothing bumps it. An unpinned linter fails somebody's unrelated pull
-# request on the day it ships a new check; test.yml pins the QEMU binfmt image
-# for the same reason. Moving to a newer shellcheck is a deliberate edit, the
-# way a base-image suite change is.
+# Both linters here are pinned and checksummed rather than taken from the runner
+# image, and nothing bumps them. An unpinned linter fails somebody's unrelated
+# pull request on the day it ships a new check; test.yml pins the QEMU binfmt
+# image for the same reason. Moving to a newer one is a deliberate edit, the way
+# a base-image suite change is.
 
 jobs:
   shellcheck:
@@ -65,3 +65,59 @@ jobs:
         run: |
           shellcheck --version
           shellcheck -S error run healthcheck
+
+  # What the Ruff gate is, and what it deliberately is not.
+  #
+  # It runs ruff over tests/, which is all the python in the tree, at
+  # "--select F" -- pyflakes, the rules that find code which cannot work rather
+  # than code someone would write differently. A name that is not defined, an
+  # import nothing uses, a variable assigned and never read, an f-string with no
+  # placeholder, and a test function silently replaced by a later one of the
+  # same name. That last is the one pytest hides best: it collects the second
+  # definition, the first one's assertions never run, and nothing reports it.
+  #
+  # F is the level the tree passes today with no edit to any .py file, which is
+  # the same decision "-S error" is for the shell: gate at what the code already
+  # meets, and tighten on purpose or not at all. What that leaves out is not
+  # small -- E501 would impose a line length the suite has never had, I001 would
+  # reorder the imports of sixteen files, and "ruff format" would rewrite
+  # nineteen of the twenty-three -- and none of it is a defect today.
+  #
+  # The selection is written out rather than inherited from ruff's default,
+  # because that default is a moving target: on this tree, unchanged, it is two
+  # findings under ruff 0.15.8 and twenty-eight under 0.16.6. "--select F" is
+  # the same on both. Pinning the version is only half of not surprising an
+  # unrelated pull request; naming the rules is the other half.
+  #
+  # --no-cache keeps ruff from leaving a .ruff_cache/ in the checkout, which is
+  # the reason the binary is unpacked into RUNNER_TEMP as well: the tree a step
+  # reads should be only what git has in it.
+  ruff:
+    name: "Ruff"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUFF_VERSION: 0.16.6
+      RUFF_SHA256: 0696335ef16615d8c7445ad438750eb0f55b3da6f153df21265a7c6d5750254f
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install ruff
+        run: |
+          set -eu
+          url="https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/ruff-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/ruff.tar.gz" "$url"
+          echo "${RUFF_SHA256}  ${RUNNER_TEMP}/ruff.tar.gz" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/ruff"
+          tar -xzf "${RUNNER_TEMP}/ruff.tar.gz" \
+            --strip-components=1 -C "${RUNNER_TEMP}/ruff"
+          echo "${RUNNER_TEMP}/ruff" >> "${GITHUB_PATH}"
+
+      - name: Check tests
+        # tests/ is where all the python is, and naming it keeps this gate as
+        # narrow as the one above, which names its two scripts rather than
+        # scanning the tree.
+        run: |
+          ruff --version
+          ruff check --no-cache --select F tests
