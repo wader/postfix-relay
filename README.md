@@ -783,7 +783,8 @@ postfix setting.
 
 Set `POSTFIX_RELAY_IMAGE` to run against an image that is already built
 instead of building one. It is taken only for an architecture this machine
-cannot build, which is the whole reason it exists: building from the
+cannot build, or for the image that was published — between them the whole
+reason it exists: building from the
 `Dockerfile` is what makes the suite test the tree it is run in, and naming an
 image it could have built is refused rather than quietly testing whatever was
 left in the image store. Building one needs the emulators registered and a
@@ -821,11 +822,11 @@ against a native run.
 
 All of that tests an image built from the tree. Every push to `master` also
 publishes `latest`, and what reaches the registry is built by buildx rather
-than by the daemon the suite uses, so a check after the push pulls that tag on
-`amd64` and on `arm64` -- the way anyone else pulls it -- and runs the same
-smoke tests against it. It is the only check that looks at the image users
-actually pull. Nothing is rolled back when it fails: the tag is out by then,
-and the check is what says so.
+than by the daemon the suite uses, so after the push that tag is pulled on
+`amd64` and on `arm64` -- the way anyone else pulls it -- and the same smoke
+tests are run against it, one job per architecture. They are what looks at the
+image a push to `master` just published. Nothing is rolled back when one
+fails: the tag is out by then, and the check is what says so.
 
 | File | What it covers |
 | --- | --- |
