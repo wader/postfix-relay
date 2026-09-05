@@ -1,5 +1,6 @@
 .git
 README.md
+SECURITY.md
 LICENSE
 tests
 pytest.ini
