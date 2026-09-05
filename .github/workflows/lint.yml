@@ -81,12 +81,16 @@ jobs:
   # same name. That last is the one pytest hides best: it collects the second
   # definition, the first one's assertions never run, and nothing reports it.
   #
-  # F is the level the tree passes today with no edit to any .py file, which is
-  # the same decision "-S error" is for the shell: gate at what the code already
-  # meets, and tighten on purpose or not at all. What that leaves out is not
-  # small -- E501 would impose a line length the suite has never had, I001 would
-  # reorder the imports of sixteen files, and "ruff format" would rewrite
-  # nineteen of the twenty-three -- and none of it is a defect today.
+  # F and B are the levels the tree passes today with no edit to any .py file,
+  # which is the same decision "-S error" is for the shell: gate at what the
+  # code already meets, and tighten on purpose or not at all. B is bugbear,
+  # added because it costs nothing here -- zero findings on both the pinned
+  # version and the one before it -- and buys B006, a mutable default argument,
+  # which is a defect that survives review and then bites once per process
+  # rather than once per call. What the two leave out is not small -- E501 would
+  # impose a line length the suite has never had, I001 would reorder the imports
+  # of seventeen files, and "ruff format" would rewrite most of them -- and none
+  # of it is a defect today. The measured cost of each is in #304.
   #
   # The selection is written out rather than inherited from ruff's default,
   # because that default is a moving target: on this tree, unchanged, it is two
@@ -125,4 +129,4 @@ jobs:
         # scanning the tree.
         run: |
           ruff --version
-          ruff check --no-cache --select F tests
+          ruff check --no-cache --select F,B tests

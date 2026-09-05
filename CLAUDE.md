@@ -49,7 +49,7 @@ why merge commits name someone else's namespace.
 | `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's — never `latest`, and on a tag ref nothing at all: a release builds nothing and instead points the version tags at the `sha-<commit>` image `master` already published and verified. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create` — after checking the commit is still `master`'s head, since master runs are not cancelled and two of them would otherwise race to write the tag. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
-| `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
+| `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F,B tests` — pyflakes and bugbear over all the python in the tree. The only two linters there are, and neither reads a config file. |
 | `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with no `pull_request` trigger, and the only one with a `schedule:`. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `SECURITY.md` | Where to report a vulnerability, and — the half that is actually load-bearing — what is *not* one here: the open relay default (invariant 23), no client TLS, starting as root, and a scanner row with no fixed version. Without that, a policy invites reports about behaviour the README documents as deliberate. Names no address: it points at github's private vulnerability reporting, which needs a repository setting rather than a file. |
@@ -200,7 +200,7 @@ shellcheck -S error run healthcheck .claude/hooks/session-start.sh
                                            # what CI runs; exits 0
 shellcheck run healthcheck                 # everything, at the stock threshold
 
-ruff check --no-cache --select F tests     # what CI runs; exits 0
+ruff check --no-cache --select F,B tests   # what CI runs; exits 0
 ruff check --statistics --select ALL tests # everything ruff has, for reference
 ```
 
@@ -249,10 +249,14 @@ under an unrelated pull request. Nothing bumps that pin — moving to a newer
 shellcheck is a deliberate edit, the way a base-image suite change is.
 
 `tests/` is all the python in the tree, and `lint.yml` gates it at
-`--select F` — pyflakes — as the **Ruff** check. The same decision made twice:
-`F` is the rules that find code which cannot work rather than code someone
-would write differently, and it is what the suite passes with no edit to any
-`.py` file. The one worth naming is `F811`, a test function replaced by a later
+`--select F,B` — pyflakes and bugbear — as the **Ruff** check. The same decision
+made twice: those are the rules that find code which cannot work rather than
+code someone would write differently, and they are what the suite passes with
+no edit to any `.py` file. `B` was added by #304 because it costs nothing here
+and buys `B006`, a mutable default argument — a defect that survives review and
+then bites once per process rather than once per call. `B` is the bugbear
+linter and not every code starting with that letter: measured with `--ignore-noqa`,
+`--select B` does not reach the `BLE001` below, which `--select BLE` does. The one worth naming is `F811`, a test function replaced by a later
 one of the same name — pytest collects the second, the first one's assertions
 never run, and nothing says so. What `F` does *not* buy is worth knowing too:
 a fixture nobody requests is invisible to every pyflakes-family tool, a helper
@@ -262,14 +266,17 @@ imports and unused locals, not that. (#268, which asked for the gate, names all
 three as the thing it would catch.) The tree had one of those, `file_missing`,
 until #305 gave it the caller it was written for.
 
-Widening is a deliberate edit here too, and it is not free: `E` is 62 `E501`s
-at ruff's 88 columns on a suite whose longest line has always been 102, `I`
-reorders the imports of sixteen files, and `ruff format` would rewrite nineteen
-of the twenty-three. None of that is a defect today. The selection is written
-out rather than left to ruff's default for the same reason the version is
-pinned: on this tree, unchanged, the default is two findings under ruff 0.15.8
-and twenty-eight under 0.16.6, while `--select F` is the same on both. Nothing
-bumps that pin either.
+Widening past those two is a deliberate edit and it is not free: `E` imposes a
+line length the suite has never had, `I` reorders the imports of most of the
+files that have any, and `ruff format` would rewrite nearly all of them, a large
+share of the diff being only `'` to `"`. None of that is a defect today, and the
+measured menu — every selection with its finding count, so the next person need
+not re-derive it — is #304. Deliberately not repeated here: those counts move
+with every merge, and what they are being used to say does not. The selection
+is written out rather than left to ruff's default for the same reason the
+version is pinned: on this tree, unchanged, the default is two findings under
+ruff 0.15.8 and twenty-eight under 0.16.6, while the named rules are the same on
+both. Nothing bumps that pin either.
 
 There is still no linter *configuration* anywhere in the repo (no
 `.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
@@ -277,7 +284,7 @@ There is still no linter *configuration* anywhere in the repo (no
 `# shellcheck disable=`, so nothing is suppressed: what the gates let through,
 they let through because of the threshold and the selection alone. The tree's
 one suppression is a `# noqa: BLE001` in `tests/test_smtp.py`, inert under
-`--select F` and written for a rule nothing has ever selected.
+`--select F,B` and written for a rule nothing has ever selected.
 
 ## What blocks a pull request
 
@@ -294,7 +301,7 @@ display `name:`, so on an ordinary pull request it appears as a skipped
 | **Pytest (arm/v7, emulated)** | `test.yml` | Pins the QEMU binfmt image, builds `linux/arm/v7` and runs `pytest -m smoke -n0` against it — four tests, and the only ones that ever start the image whose packaging differs. It ran on `master` and behind a `test-emulated` label until #273; the label is gone, and 42-152s against 174-275s for either native job is why it can be on the path a pull request waits on without lengthening it. |
 | **Event File** | `test.yml` | Uploads the triggering event payload for the reporter. |
 | **ShellCheck** | `lint.yml` | Downloads shellcheck at the version and sha256 pinned in the job's `env:`, then `shellcheck -S error` over `run`, `healthcheck` and `.claude/hooks/session-start.sh`. Seconds, no docker. See [Lint](#lint) for why that threshold and not a stricter one. |
-| **Ruff** | `lint.yml` | The same shape, one job over: downloads ruff at the version and sha256 pinned in the job's `env:`, then `ruff check --no-cache --select F tests`. Seconds, no docker. See [Lint](#lint) for why that selection and not a wider one, and why it is spelled out rather than inherited. |
+| **Ruff** | `lint.yml` | The same shape, one job over: downloads ruff at the version and sha256 pinned in the job's `env:`, then `ruff check --no-cache --select F,B tests`. Seconds, no docker. See [Lint](#lint) for why that selection and not a wider one, and why it is spelled out rather than inherited. |
 | **Test Results** | `test-results.yml` | Runs on `workflow_run` of `test`, downloads the junit artifacts and publishes them onto the PR. |
 
 **Verify Published Image (amd64)** and **(arm64)** do not run on a pull

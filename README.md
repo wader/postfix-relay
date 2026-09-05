@@ -946,10 +946,10 @@ that is already correct.
 
 The tests themselves are python, and pytest only reads the lines it runs, so
 they are linted the same way -- with [ruff](https://docs.astral.sh/ruff/), at
-the pyflakes rules:
+the pyflakes and bugbear rules:
 
 ```bash
-ruff check --select F tests
+ruff check --select F,B tests
 ```
 
 Same idea as the threshold above: those are the rules that find code which
