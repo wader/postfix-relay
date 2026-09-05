@@ -832,7 +832,10 @@ changing any of them.
     2026-03-19, when 76 of its 77 version tags were force-pushed to a
     credential stealer — a tag pin would not have helped, and the job needs no
     checkout, no buildx and no QEMU, so it costs one `curl` to skip the
-    dependency entirely. Nothing bumps that pin, and unusually little is lost
+    dependency entirely -- and having no checkout is why the two `gh` steps set
+    `GH_REPO`: `gh` resolves the repository it acts on from `--repo`, then that
+    variable, then the working directory's git remotes, and with nothing
+    checked out there are none. Nothing bumps that pin, and unusually little is lost
     by that: the database is fetched fresh on every run and is what carries the
     signal.
     The **Verify Published Image** jobs in `ci.yml` look at the same artefact
