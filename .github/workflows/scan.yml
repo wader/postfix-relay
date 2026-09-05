@@ -158,6 +158,13 @@ jobs:
         if: steps.scan.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job checks nothing out, on purpose -- trivy pulls the
+          # published manifest itself. gh resolves the repository it acts on
+          # from --repo, then GH_REPO, then the git remotes of the working
+          # directory; with no checkout there are none, so without this it
+          # exits "failed to run git: fatal: not a git repository" before it
+          # ever reaches the API.
+          GH_REPO: ${{ github.repository }}
           IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
@@ -195,6 +202,13 @@ jobs:
         if: steps.scan.outputs.count == '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job checks nothing out, on purpose -- trivy pulls the
+          # published manifest itself. gh resolves the repository it acts on
+          # from --repo, then GH_REPO, then the git remotes of the working
+          # directory; with no checkout there are none, so without this it
+          # exits "failed to run git: fatal: not a git repository" before it
+          # ever reaches the API.
+          GH_REPO: ${{ github.repository }}
           IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
