@@ -404,6 +404,15 @@ jobs:
           if [ "${head}" != "${{ github.sha }}" ] ; then
             echo "::notice::${{ github.sha }} is no longer master's head (${head}); leaving latest to that run"
           fi
+        env:
+          # The other half of the emptiness check above, for the case where the
+          # command returns nothing at all rather than an empty string: git
+          # answers a repository it cannot reach by asking for credentials, and
+          # nobody is here to type them. Without this the job sits on that
+          # prompt until the job timeout above expires, long after the answer
+          # was known to be unavailable; with it, git fails at once and the
+          # check exits 1 as it means to.
+          GIT_TERMINAL_PROMPT: "0"
       -
         name: Login to DockerHub
         # After the check above, and gated with it: standing down writes
