@@ -13,7 +13,7 @@ import threading
 import pytest
 
 from tests.helpers import (esmtp_features, postconf, send, send_raw, smtp_connect,
-                           wait_for_log)
+                           wait_for_log, wait_for_log_line)
 
 
 def raw_body(mailpit, message):
@@ -281,15 +281,22 @@ def test_a_quoted_local_part_is_relayed(postfix, mailpit):
     changes its mind about the recipient: mailpit answered "553 5.1.3 The
     address is not a valid RFC 5321 address" to it from v1.28.3 until the fix
     in v1.31.1 (axllent/mailpit#731), which held the pin down for four minor
-    versions back when the assertion read the stored message. The peer is
-    still asked for, so that this is a real delivery attempt to a server that
-    is there rather than a deferral.
+    versions back when the assertion read the stored message. Reading it back
+    is still the wrong question even now that the peer accepts the address:
+    mailpit unquotes the local part in what its API returns, so what it hands
+    over is its parser's idea of the address rather than the one that went
+    over the wire.
+
+    status=sent on the same line is the next hop saying it took the message,
+    which the log carries and the stored copy does not. On the line, and not
+    on the log, because this relay is shared: every other test in this file
+    writes status=sent into it, so the two halves have to be one delivery.
     """
     send(postfix, recipients=('"odd user"@example.com',), subject='quoted local part')
 
-    handed_over = wait_for_log(postfix, 'to=<"odd user"@example.com>')
+    delivery = wait_for_log_line(postfix, 'to=<"odd user"@example.com>')
 
-    assert 'to=<"odd user"@example.com>' in handed_over
+    assert 'status=sent' in delivery
 
 
 def test_an_address_with_a_plus_is_relayed_untouched(postfix, mailpit):
