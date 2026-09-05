@@ -377,13 +377,45 @@ jobs:
         env:
           DOCKER_REPO: "${{ secrets.DOCKER_REPO }}"
       -
+        name: Check this commit is still master's head
+        id: head
+        # Master runs are deliberately not cancelled -- see the concurrency
+        # block at the top of this file -- so two merges close together give
+        # two runs whose promote jobs nothing orders. The older one finishing
+        # last would put latest back on the older image, where it would stay
+        # until the next push to master. Asking whether this run is still the
+        # head is what orders them: the newer run promotes its own image and
+        # the older stands down, rather than the last writer winning.
+        #
+        # Read from the remote rather than from a checkout, which this job has
+        # no other use for. The emptiness check is not defensive padding: the
+        # pipeline's status is cut's and not ls-remote's, so a failure to reach
+        # github arrives as an empty string rather than a non-zero exit, and
+        # without it this would read as "superseded" and quietly stop promoting
+        # anything ever again -- the one outcome worse than promoting the wrong
+        # image. (issue #306)
+        run: |
+          head=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/master | cut -f1)
+          if [ -z "${head}" ] ; then
+            echo "::error::could not read what master points at"
+            exit 1
+          fi
+          echo "head=${head}" >> "${GITHUB_OUTPUT}"
+          if [ "${head}" != "${{ github.sha }}" ] ; then
+            echo "::notice::${{ github.sha }} is no longer master's head (${head}); leaving latest to that run"
+          fi
+      -
         name: Login to DockerHub
+        # After the check above, and gated with it: standing down writes
+        # nothing, so there is nothing to authenticate for.
+        if: steps.head.outputs.head == github.sha
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Point latest at the image that was verified
+        if: steps.head.outputs.head == github.sha
         # imagetools copies the manifest list rather than building or pushing
         # anything again: latest ends up on the same digest, with the same three
         # architectures and the same provenance attestations under it. Verified
