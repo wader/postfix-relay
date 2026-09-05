@@ -11,10 +11,10 @@
 # Required checks are matched by job name, not by workflow name. The names
 # that exist are "Build Image", "Pytest", "Pytest (arm64)",
 # "Pytest (arm/v7, emulated)", "Event File", "Test Results", "ShellCheck",
-# "Ruff", "Verify Published Image (amd64)" / "(arm64)" and "Publish latest";
-# "ci", "test" and "lint" are workflows and never report a check of their own,
-# and one workflow can report more than one -- "lint" reports both "ShellCheck"
-# and "Ruff".
+# "Ruff", "Verify Published Image (amd64)" / "(arm64)", "Publish latest" and
+# "Image Scan"; "ci", "test", "lint" and "scan" are workflows and never report
+# a check of their own, and one workflow can report more than one -- "lint"
+# reports both "ShellCheck" and "Ruff".
 #
 # "Pytest (arm/v7, emulated)" runs on every pull request since #273, and is
 # still not in the required list: its verdict comes from an emulator, where a
@@ -25,6 +25,15 @@
 # The two "Verify Published Image" jobs are not candidates either, nor is
 # "Publish latest", and for a firmer reason: they check -- and then tag -- the
 # image a push to master published, so they never run on a pull request at all.
+#
+# "Image Scan" is not a candidate for that same firmer reason and one of its
+# own. It runs on a schedule against the published image and has no
+# pull_request trigger, so it reports no check here at all; and scan.yml's
+# header says why letting a vulnerability database decide a pull request would
+# be the wrong trade. It matters for auto-merge that it stays that way: these
+# pull requests merge themselves once the required checks pass, and a gate
+# whose verdict changes overnight for reasons unrelated to the diff would block
+# a base image bump on the morning when that bump is the fix.
 
 name: Dependabot auto-merge
 
