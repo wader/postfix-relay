@@ -46,10 +46,11 @@ why merge commits name someone else's namespace.
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
 | `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. |
+| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's for every ref — never `latest`. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create`. Spelled out rather than a matrix, for the reason test.yml gives — a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error run healthcheck` — the only threshold the two scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F tests` — pyflakes over all the python in the tree. The only two linters there are, and neither reads a config file. |
+| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with no `pull_request` trigger, and the only one with a `schedule:`. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
 | `.github/rulesets/master.json` | The `master` ruleset in github's export/import form: the five required status checks and nothing else. Conditioned on `~DEFAULT_BRANCH` rather than a literal `refs/heads/master`, so renaming the default branch does not quietly stop gating it. `tests/test_ruleset.py` is what keeps it true; nothing else in the tree reads it. It is the record that makes "CI blocks a bad pull request" checkable instead of believed, and it is what gets imported under Settings > Rules. |
@@ -303,6 +304,12 @@ runner, so a missing or mislabelled entry would leave both green while the
 architecture that lost it fails to pull at all — that step reads the list
 itself. (issue #284)
 
+**Image Scan** does not run on a pull request either, and for a reason of its
+own rather than a scheduling one: `scan.yml` carries no `pull_request` trigger
+at all, so it reports no check here even as a skipped one. That is the point of
+it rather than an omission — invariant 34 — and it is why nothing above changes
+for a contributor. (issue #269)
+
 Notes a contributor will hit:
 
 - **Required checks match the job's `name:`**, never the workflow name and
@@ -335,7 +342,11 @@ Notes a contributor will hit:
   **Verify Published Image** jobs, and **Publish latest** with them, have
   nothing to report on a branch at all: what they check, and what one of them
   then tags, is the image a push to `master` published, so on a pull request
-  they are skipped by the `if:` that keeps them off it.
+  they are skipped by the `if:` that keeps them off it. **Image Scan** goes
+  further and reports nothing at all: `scan.yml` has no `pull_request` trigger,
+  so there is no check to require, and adding one would put a vulnerability
+  database — an input that cannot be pinned, because pinning it defeats the
+  scan — in front of pull requests that cannot have caused its verdict.
 - **The ruleset carries that one rule and no bypass actors.**
   `strict_required_status_checks_policy` is false, so a branch does not have to
   be brought up to date with `master` before it merges — with dependabot
@@ -353,9 +364,11 @@ Notes a contributor will hit:
   in `test-results.yml`; everything else is on a major tag, and Dependabot's
   weekly `github-actions` ecosystem bumps them. Do not "normalise" that
   exception away.
-- `ci.yml` runs on pushes to every branch and tag; `test.yml` runs on pushes to
-  `master` only, plus `pull_request` and `workflow_dispatch`. Both cancel
-  in-flight runs on any ref but `master`.
+- `ci.yml` runs on pushes to every branch and tag, plus `pull_request` and
+  `workflow_dispatch`; `test.yml` runs on pushes to `master` only, plus
+  `pull_request` and `workflow_dispatch`. Both cancel in-flight runs on any ref
+  but `master`. `scan.yml` is the only one with a `schedule:`, and the only one
+  with no `pull_request` trigger.
 - Version skew: CI pins Python 3.13, and nothing pins a Python version locally.
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
@@ -818,3 +831,47 @@ changing any of them.
     architecture, or the published one 30 now also admits — the machine's own
     would put the upgrade between two architectures and pass either way, which
     is the silence 30 exists to stop. (issue #267)
+
+34. **`scan.yml` has no `pull_request` trigger, uses no third-party action, and
+    passes `--ignore-unfixed`. All three look like something left out.**
+    The scan runs on a clock against the *published* image, because `ci.yml`
+    pushes nothing on a pull request — a scan there would examine an artifact
+    with no users while the one with eleven million pulls went unexamined — and
+    because a red would never be attributable to the diff: `ci.yml` builds only
+    what the tree contains, so a pull request touching `run`, a fixture or the
+    README cannot introduce a Debian CVE, and its author holds no lever, the
+    remedy being a base bump `dependabot.yml` deliberately keeps out of
+    auto-merge. `lint.yml`'s header already states the rule this follows —
+    an unpinnable input must not fail somebody's unrelated pull request — and a
+    vulnerability database is that input by construction, since pinning it is
+    the same as not running the scan. Promoting this to a required check means
+    answering that, not assuming it.
+    Trivy is a checksummed release download rather than
+    `aquasecurity/trivy-action` because that wrapper was compromised on
+    2026-03-19, when 76 of its 77 version tags were force-pushed to a
+    credential stealer — a tag pin would not have helped, and the job needs no
+    checkout, no buildx and no QEMU, so it costs one `curl` to skip the
+    dependency entirely. Nothing bumps that pin, and unusually little is lost
+    by that: the database is fetched fresh on every run and is what carries the
+    signal.
+    The **Verify Published Image** jobs in `ci.yml` look at the same artefact
+    and do not overlap with this: they run on a push to `master`, so they say
+    whether what was just published works, while this says whether what has
+    been sitting there since has gone stale. The window this covers is exactly
+    the one no push happens in.
+    `--ignore-unfixed` is what makes the result mean anything. Without it the
+    job reports around 290 findings Debian has assessed as not warranting a
+    stable update and nobody here can close. The largest single group of them,
+    68 of 287 rows when this was written, is perl -- in the image only so the
+    manually-invoked `qshape` keeps working (invariant 25), and executed by no
+    relaying container. With it, a red run
+    says exactly one thing: Debian shipped a fix the published image lacks.
+    It is expected to be green — it was when it was written, `trivy` and
+    `grype` both reporting zero fixable findings and `apt-get -s full-upgrade`
+    inside the published image agreeing.
+    The `no-cache` dispatch input on `ci.yml` is the other half and does not
+    stand alone: the apt install is unversioned, so a build resolves current
+    archive versions, but `cache-from`/`cache-to` make that layer a cache hit
+    until the `FROM` line moves. Without the input, the only answer to a
+    finding is to wait two to three weeks for the next `trixie-<date>-slim`
+    tag. (issue #269)
