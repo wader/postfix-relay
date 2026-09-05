@@ -126,8 +126,8 @@ jobs:
     # Its failures are still harder to read than a native run's, which is why
     # running it is all this asks for: it reports, a person looks, and a QEMU
     # artefact costs a second look instead of a merge. Whether it also blocks
-    # one is a ruleset decision, which no file here can take -- see the header
-    # in dependabot-auto-merge.yml.
+    # one is a separate decision, recorded in .github/rulesets/master.json,
+    # which this leaves alone.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

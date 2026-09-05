@@ -4,19 +4,25 @@
 # Requirements:
 # - "Allow auto-merge" enabled in the repository settings
 # - a ruleset on master with required status checks, otherwise auto-merge
-#   does not wait for CI and merges straight away
+#   does not wait for CI and merges straight away. The one this expects is
+#   committed as .github/rulesets/master.json, in the form github's
+#   "Import a ruleset" takes.
 #
 # Required checks are matched by job name, not by workflow name. The names
 # that exist are "Build Image", "Pytest", "Pytest (arm64)",
-# "Pytest (arm/v7, emulated)", "Event File", "Test Results" and "ShellCheck";
-# "ci", "test" and "lint" are workflows and never report a check of their own.
+# "Pytest (arm/v7, emulated)", "Event File", "Test Results", "ShellCheck" and
+# "Verify Published Image (amd64)" / "(arm64)"; "ci", "test" and "lint" are
+# workflows and never report a check of their own.
 #
-# All seven run on every pull request now. "Pytest (arm/v7, emulated)" was not
-# a candidate while it sat behind a "test-emulated" label, because a required
-# check that is skipped gates on a run that did not happen; #273 removed the
-# label. Whether it is required is a ruleset setting this file cannot make:
-# auto-merge waits for what the ruleset names and for nothing else, so a red
-# emulated check stops a minor or patch update only once it is added there.
+# "Pytest (arm/v7, emulated)" runs on every pull request since #273, and is
+# still not in the required list: its verdict comes from an emulator, where a
+# QEMU artefact reads like a real failure, so it reports and a person looks
+# rather than blocking a merge. Requiring it means adding it to
+# .github/rulesets/master.json and importing that.
+#
+# The two "Verify Published Image" jobs are not candidates either, and for a
+# firmer reason: they check the image a push to master published, so they never
+# run on a pull request at all.
 
 name: Dependabot auto-merge
 
