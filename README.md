@@ -747,6 +747,13 @@ that file is never built, it exists so that Dependabot can offer a bump to a
 version the tests otherwise name only in Python, and `tests/fixtures/mailpit.py`
 reads the tag back out of it.
 
+The upgrade tests pull one more image: the last released `mwader/postfix-relay`,
+which they start first so that the state it leaves behind is read back by the
+image built from the tree rather than by another container of the same build.
+Its version is pinned in `tests/upgrade-from.Dockerfile`, the same way and for
+the same reason as mailpit's. A release rather than `latest`, because `latest`
+is rebuilt from `master` on every merge and would be the image under test.
+
 ```bash
 # Create and enable python virtual environment
 python -m venv venv
@@ -819,6 +826,7 @@ against a native run.
 | `test_capabilities.py` | Relaying with everything docker grants by default taken away but the documented set |
 | `test_secrets.py` | Configuration read from a file instead of the environment, and what the health check still expects |
 | `test_qshape.py` | The queue tool the troubleshooting section has users run |
+| `test_upgrade.py` | Starting on the state the last released image wrote, which is what the "Upgrading" section promises |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and

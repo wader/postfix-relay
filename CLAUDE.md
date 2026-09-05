@@ -39,18 +39,19 @@ why merge commits name someone else's namespace.
 | `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py`, and by three of the four fixture modules. `file_missing` is defined and never called. |
 | `tests/requirements.txt` | Six pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not. |
 | `tests/fixtures/shared_network.py` | Session-scoped `shared_network`: a testcontainers `Network()` with a generated, labelled name — not a fixed one, so an interrupted run leaves nothing for the next one to collide with. |
-| `tests/fixtures/postfix.py` | Six fixtures: `postfix_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH`. |
+| `tests/fixtures/postfix.py` | Seven fixtures: `postfix_image`, `published_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH`, and the released image out of `tests/upgrade-from.Dockerfile`. |
 | `tests/mailpit.Dockerfile` | Not built and no part of any image. One `FROM axllent/mailpit:<tag>` line, so that Dependabot's docker ecosystem — whose file fetcher matches any name containing `dockerfile` — can offer a bump to the test peer. `tests/fixtures/mailpit.py` reads the tag back out of it. |
+| `tests/upgrade-from.Dockerfile` | The other unbuilt anchor: one `FROM mwader/postfix-relay:<version>` line, read back by `tests/fixtures/postfix.py`, naming the released image `tests/test_upgrade.py` starts before the one built from the tree. A release and not `latest` — see invariant 33. |
 | `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, whose image is read from `tests/mailpit.Dockerfile` rather than written here: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
-| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`. Each has a row in the README's per-file table. |
+| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
 | `.github/workflows/ci.yml` | `name: ci`. One job, `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. One job, `shellcheck`, displayed as **ShellCheck**: downloads a pinned, checksummed shellcheck and runs `shellcheck -S error run healthcheck`. The only linter in the tree, and the only threshold the two scripts pass. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment is also where the check names are recorded. |
-| `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests` for the mailpit anchor. |
+| `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
 
 There is no `CONTRIBUTING.md`, no linter *config* of any kind — `lint.yml`
 passes its one flag on the command line — and no per-file license header — see
@@ -95,6 +96,13 @@ tests/test_*.py
                                                                     │
                                           tests/mailpit.Dockerfile ─┘
                                           (the tag, where dependabot can see it)
+
+         test_upgrade.py ──> published_image (session)
+                                 └── docker pull, for the platform of the
+                                     image under test
+                                          │
+                        tests/upgrade-from.Dockerfile ─┘
+                        (the released version, where dependabot can see it)
 
          docker_volume (function)   -- takes no fixtures; creates and removes
                                        a docker volume and nothing else
@@ -675,3 +683,25 @@ changing any of them.
     `FROM` line: a fallback to a version written in the module would work
     perfectly and restore exactly the invisible constant this replaces.
     (issue #235)
+
+33. **The image `tests/test_upgrade.py` upgrades *from* is a release, and the
+    module asks that image what it can do rather than comparing versions.**
+    `tests/upgrade-from.Dockerfile` is the second anchor of the kind 32
+    describes, and the same directory entry in `.github/dependabot.yml`
+    already covers it — the fetcher lists a directory rather than a name.
+    What is different is which tag it may hold.
+    `mwader/postfix-relay:latest` is rebuilt from `master` on every merge, so
+    on `master` it *is* the image under test and the upgrade is one to itself;
+    it also moves with nothing in the tree recording that it did, which leaves
+    a failure impossible to attribute. A release stays put until the line is
+    edited, and it is what deployments actually run. The cost is that it lags
+    the tree by whatever has been merged since: SRS landed after 1.2.17, so
+    the released image never wrote a secret, and the SRS test skips itself
+    saying so instead of passing. It decides that by reading the released
+    image's own `run` for `POSTSRSD_`, not by comparing version numbers, so it
+    starts running of its own accord the first time the anchor moves past the
+    release that adds the feature. And `published_image` pulls for the
+    platform of the image under test rather than the machine's: with
+    `POSTFIX_RELAY_IMAGE` naming a foreign image, the machine's own would put
+    the upgrade between two architectures and pass either way, which is the
+    silence 30 exists to stop. (issue #267)

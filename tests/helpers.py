@@ -3,6 +3,7 @@ import re
 import smtplib
 import time
 
+import dkim
 import docker
 import requests
 
@@ -195,6 +196,16 @@ def dkim_dns_record(container, domain, selector):
     """
     text = container_exec(container, ["cat", f"/etc/opendkim/keys/{domain}/{selector}.txt"])
     return "".join(re.findall(r'"([^"]*)"', text))
+
+
+def verifies(raw, record):
+    """Whether a signed message validates against the record it points at.
+
+    The public key is handed to the verifier directly instead of being looked
+    up: there is no DNS in the test network, and what has to be checked is that
+    the signature matches the record the container tells the user to publish.
+    """
+    return dkim.verify(raw, dnsfunc=lambda name, **kwargs: record.encode())
 
 
 def container_log(container):

@@ -32,6 +32,31 @@ PREBUILT_IMAGE = os.environ.get('POSTFIX_RELAY_IMAGE')
 # is the one way an emulated run can be worse than no run at all.
 EXPECTED_ARCHITECTURE = os.environ.get('POSTFIX_RELAY_ARCH')
 
+
+def _published_image():
+    """The released image an upgrade starts from, read from the anchor file.
+
+    tests/upgrade-from.Dockerfile names it where Dependabot looks and says why
+    it is a release rather than "latest"; this reads the tag back out, so the
+    version is written once and a bump is one line in one file.
+
+    A missing or unparseable anchor raises, for the reason the mailpit one
+    does: a fallback written here would be a constant that works and that
+    nothing updates.
+    """
+    anchor = os.path.join(os.path.dirname(__file__), os.pardir, 'upgrade-from.Dockerfile')
+
+    with open(anchor, encoding='utf-8') as lines:
+        for line in lines:
+            if line.startswith('FROM '):
+                return line[len('FROM '):].strip()
+
+    raise RuntimeError(f"no FROM line to read the published image from in {anchor}")
+
+
+PUBLISHED_IMAGE = _published_image()
+
+
 # Containers sharing a network need distinct aliases.
 _alias_numbers = itertools.count(1)
 
@@ -67,6 +92,51 @@ def postfix_image(tmp_path_factory):
         lambda: DockerImage(path=ROOT_PATH, tag=IMAGE_TAG).build())
 
     return IMAGE_TAG
+
+
+def _platform(image):
+    """The platform of a local image, spelled the way a pull takes one."""
+    attrs = docker.from_env().images.get(image).attrs
+    parts = [attrs['Os'], attrs['Architecture']]
+    if attrs.get('Variant'):
+        parts.append(attrs['Variant'])
+    return '/'.join(parts)
+
+
+def _pull_published(platform):
+    """Fetch the released image for a platform, unless it is already here.
+
+    The same trade as the mailpit fixture makes: the tag names an exact
+    version, so an image that is here is the image a pull would bring, and
+    asking again spends one of the hundred anonymous pulls Docker Hub allows
+    per six hours for nothing. The platform is compared as well as the name,
+    because the copy an earlier run left behind may be this machine's own
+    rather than the one being asked for.
+    """
+    try:
+        if _platform(PUBLISHED_IMAGE) == platform:
+            return
+    except docker.errors.ImageNotFound:
+        pass
+
+    docker.from_env().images.pull(PUBLISHED_IMAGE, platform=platform)
+
+
+@pytest.fixture(scope="session")
+def published_image(postfix_image, tmp_path_factory):
+    """The last released image, fetched once for the whole run.
+
+    Pulled for the platform of the image under test rather than for the
+    machine's. With POSTFIX_RELAY_IMAGE naming a foreign image, the machine's
+    own would put the upgrade between two architectures and pass either way,
+    which is the silence POSTFIX_RELAY_ARCH exists to stop.
+    """
+    platform = _platform(postfix_image)
+
+    once_across_workers(tmp_path_factory, "published-image",
+                        lambda: _pull_published(platform))
+
+    return PUBLISHED_IMAGE
 
 
 def _start(image, network, env=None, files=None, volumes=None, ports=(25,), alias=None,
@@ -138,13 +208,15 @@ def postfix_factory(postfix_image, shared_network, request):
     "command" replaces the image's own, for the few tests that have to stand
     the image up differently from the way it ships. "wait_ready" can be turned
     off for containers that are not expected to come up at all, and "kwargs" is
-    passed to docker as is.
+    passed to docker as is. "image" stands up another image than the one under
+    test, which only the upgrade tests want: they write the state with the
+    released image before the one built from the tree reads it.
     """
     started = []
 
     def start(env=None, files=None, volumes=None, ports=(25,), alias=None, command=None,
-              wait_ready=True, kwargs=None):
-        return _start(postfix_image, shared_network, env=env, files=files,
+              wait_ready=True, kwargs=None, image=None):
+        return _start(image or postfix_image, shared_network, env=env, files=files,
                       volumes=volumes, ports=ports, alias=alias, command=command,
                       wait_ready=wait_ready, kwargs=kwargs, register=started.append)
 

@@ -47,21 +47,24 @@ updates:
     schedule:
       interval: weekly
 
-  # The mailpit image, which is the server every relayed message is read back
-  # from. It lives in a string in tests/fixtures/mailpit.py, and no ecosystem
-  # reads Python, so tests/mailpit.Dockerfile names it where this one looks --
+  # The two images the suite runs beside the one it builds: mailpit, the server
+  # every relayed message is read back from, and the last released
+  # postfix-relay, which the upgrade tests start first so that this tree's
+  # image reads state an older one wrote. Both live in a string in
+  # tests/fixtures, and no ecosystem reads Python, so tests/mailpit.Dockerfile
+  # and tests/upgrade-from.Dockerfile name them where this one looks --
   # dependabot's docker file fetcher matches any file whose name contains
-  # "dockerfile" -- and the fixture reads the tag back out of that file. The
-  # directory has to be named: the fetcher lists the one it is given and does
-  # not recurse, so the base image entry on "/" neither sees this file nor is
-  # disturbed by it.
+  # "dockerfile", and it lists a directory rather than a single name, so one
+  # entry covers both -- and the fixtures read the tags back out of them. The
+  # directory has to be named: the fetcher does not recurse, so the base image
+  # entry on "/" neither sees these files nor is disturbed by them.
   #
   # Unlike the base image above, a bump here is an ordinary semver minor or
   # patch, so the auto-merge rule applies to it. That is the right way round:
-  # this is the test peer rather than the shipped image, every one of these
-  # pull requests runs the whole suite against the new mailpit, and the suite
-  # is the only thing that can say whether it still answers as the tests
-  # expect. One that does not stays red and waits for a person.
+  # these are test peers rather than the shipped image, every one of these
+  # pull requests runs the whole suite against the new one, and the suite is
+  # the only thing that can say whether it still behaves as the tests expect.
+  # One that does not stays red and waits for a person.
   - package-ecosystem: docker
     directory: /tests
     schedule:
