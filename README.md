@@ -845,6 +845,7 @@ and the check is what says so.
 | `test_secrets.py` | Configuration read from a file instead of the environment, and what the health check still expects |
 | `test_qshape.py` | The queue tool the troubleshooting section has users run |
 | `test_upgrade.py` | Starting on the state the last released image wrote, which is what the "Upgrading" section promises |
+| `test_ruleset.py` | The required status checks recorded in `.github/rulesets/master.json`, against the jobs that report them |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and
