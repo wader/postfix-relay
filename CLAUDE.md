@@ -403,6 +403,25 @@ Notes a contributor will hit:
   correct behaviour, marked `xfail(strict=True)` with its issue. There are no
   current instances, and `xfail_strict` is not set in `pytest.ini`, so
   `strict=True` has to be written on each marker.
+- **Opening the issue or the pull request.** The integration a Claude session
+  here authenticates through can read this repository but cannot write to it:
+  creating an issue, creating a pull request and commenting on either all come
+  back `403 Resource not accessible by integration`, while `git push` to a
+  branch on a fork works. That is what issue #191 is about, and until it is
+  settled an agent cannot open the issue or the pull request its own change
+  needs. What it can do is push the branch and hand a person the link that
+  opens the form already filled in — `issues/new?title=…&body=…` for an issue,
+  `compare/master...<fork-owner>:<repo>:<branch>?expand=1` for a pull request.
+  Those links belong in the reply, written out in full: a file to download is
+  one step further from the browser, which is the one place they can be used.
+  Comments have no such link, so that case is the issue's own URL plus the text
+  to paste.
+- **Text bound for GitHub is not wrapped.** Issue bodies, pull request bodies
+  and comments go in as long lines and let GitHub reflow them to whatever width
+  the reader has; wrapped at 79 columns the way this file is, they render as a
+  narrow column down the left of a wide page. The wrapping this repository uses
+  is for what is *committed* — this file, the README, commit messages, the
+  comments inside `run` and the workflows — and stops at the edge of the tree.
 - **Docs.** User-visible behaviour goes in `README.md`. If a change makes the
   README wrong, the change is not finished. The same holds for this file, and
   it is the half that gets forgotten: it describes the tree, so a change to
