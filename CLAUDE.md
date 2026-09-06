@@ -406,8 +406,14 @@ Notes a contributor will hit:
   but `master`. That exemption is deliberate — a cancelled `master` run is one
   that never published — and it is what makes two merges close together
   overlap, which is why **Publish latest** checks `master`'s head before it
-  moves the tag. `scan.yml` is the only one with a `schedule:`, and the only
-  one with no `pull_request` trigger.
+  moves the tag. `cancel-in-progress: false` did not buy that exemption on its
+  own: it protects a run that is already going, while github keeps at most one
+  run *pending* per concurrency group and cancels that one as soon as a third
+  arrives. Three `master` runs of `test.yml` were cancelled that way on
+  5 September, before a single job of theirs started. So the group itself
+  carries the commit on `master`, which is what keeps master runs from queueing
+  behind each other at all. `scan.yml` is the only one with a `schedule:`, and
+  the only one with no `pull_request` trigger.
 - Version skew: CI pins Python 3.13, and nothing pins a Python version locally.
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
