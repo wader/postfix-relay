@@ -189,6 +189,26 @@ dkimConfig()
 
     echo "DNS records:"
     for d in $OPENDKIM_DOMAINS ; do
+      # A comma is an ordinary character in a domain name to this parsing,
+      # which splits OPENDKIM_DOMAINS on whitespace and nothing else. Every
+      # other comma-separated variable this image reads -- POSTFIX_mynetworks,
+      # POSTSRSD_SRS_EXCLUDE_DOMAINS -- makes a comma here a plausible typo
+      # rather than a plausible domain, and the loop below has no way to tell
+      # the two apart: it would generate a key, print a record nobody can
+      # publish, and write a signing rule no sender matches, all while opendkim
+      # starts and the health check calls the relay healthy. Refusing it here
+      # is the same choice run already makes for a daemon that did not start,
+      # a POSTSRSD_SRS_DOMAIN this build cannot honour, or a secret it cannot
+      # read: loud now, rather than a relay that signs nothing and says
+      # nothing about it.
+      if [[ "$d" == *,* ]] ; then
+        echo "OPENDKIM_DOMAINS entry '$d' contains a comma, which" \
+             "OPENDKIM_DOMAINS does not use as a separator -- it is" \
+             "whitespace-separated. Refusing to relay with a domain list" \
+             "that would silently sign for the wrong name." >&2
+        exit 1
+      fi
+
       domain=$(echo "$d"| cut -f1 -d '=')
       selector=$(expr match "$d" '.*\=\(.*\)')
       if [ -z "$selector" ] ; then

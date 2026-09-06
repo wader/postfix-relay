@@ -353,6 +353,27 @@ def test_the_domain_list_may_be_written_over_several_lines(postfix_shared):
         ['sel2.private', 'sel2.txt']
 
 
+def test_a_comma_in_the_domain_list_is_refused(postfix_factory):
+    """OPENDKIM_DOMAINS is whitespace-separated, and a comma is an ordinary
+    character in a domain name to the parsing that reads it (issue #340).
+
+    Two of this image's other list variables -- POSTFIX_mynetworks,
+    POSTSRSD_SRS_EXCLUDE_DOMAINS -- are comma-separated, which is what makes a
+    comma here a plausible typo rather than a plausible domain. Left alone, it
+    would generate a key for a name nobody can publish a record for, sign for
+    it, and match no sender -- DKIM silently off on a relay that reports
+    healthy the whole time. Refusing it loudly is the same choice run already
+    makes for a key it could not generate or read.
+    """
+    relay = postfix_factory(
+        env={'OPENDKIM_DOMAINS': 'first.example,second.example'},
+        wait_ready=False)
+
+    assert exit_code_within(relay, seconds=20) == 1
+    assert 'first.example,second.example' in container_stderr(relay)
+    assert 'comma' in container_stderr(relay)
+
+
 def test_a_key_brought_from_somewhere_else_is_used_as_it_is(postfix_factory, mailpit,
                                                             generated_keypair):
     """Moving a relay must not mean republishing the DNS records.
