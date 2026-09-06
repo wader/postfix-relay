@@ -889,13 +889,18 @@ built by buildx rather than by the daemon the suite uses, so a push to `master`
 publishes the image under its commit before it publishes it under `latest`:
 the pushed image is pulled back on `amd64` and on `arm64` -- the way anyone
 else pulls it -- and the same smoke tests are run against it. Its manifest is
-read too, and the push fails if it does not list all three architectures that
+read too, and the check fails if it does not list all three architectures that
 were built: each half of the check pulls the entry for its own architecture,
 so the one with no runner is only visible there. Only then is `latest` moved
-onto that image. It is the only check that looks at what a push to `master`
-publishes, and it runs before anyone can pull it: an image that does not come
-up leaves `latest` where it was. The upgrade tests above reach the registry
-too, but for a released tag, which is a different question.
+onto that image.
+
+What a failure costs is worth being exact about, because the image is on the
+registry before any of this runs: the build pushed it under the commit, and
+that tag stays. What waits is `latest`, which is moved afterwards and only on
+the strength of these checks, so an image that does not come up leaves the tag
+everyone pulls where it was. That is what makes them the only checks looking
+at what a push to `master` publishes. The upgrade tests above reach the
+registry too, but for a released tag, which is a different question.
 
 A release is the same image again rather than another one. Pushing a version
 tag builds nothing: the commit it names was on `master` first, so its image is
