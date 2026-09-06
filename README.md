@@ -451,19 +451,41 @@ actually handles mail is not root:
 | --- | --- |
 | the start-up script, `master`, `rsyslogd` | `root` |
 | `saslauthd`, when `SASL_Passwds` is set | `root` |
-| `smtpd`, `cleanup`, `qmgr`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
+| `local`, `virtual`, on the deliveries below | `root`, not chrooted |
+| `smtpd`, `cleanup`, `smtp`, the rest of postfix | `postfix`, chrooted into `/var/spool/postfix` |
 | `opendkim` | `opendkim` |
 | `postsrsd` | `postsrsd`, chrooted into `/var/lib/postsrsd` |
 
-As the relay ships, the root processes supervise and log; they do not parse
-untrusted input. Setting `SASL_Passwds` adds one that does: `saslauthd` runs as
-root and checks the username and password an SMTP client sent, through PAM.
+Two entries in that table are worth reading twice. The chroot is what
+`master.cf` asks for per service, so `qmgr`, `proxymap`, `proxywrite` and
+`postlog` run as `postfix` without one; and the root processes are not all
+supervisors.
+
+`local(8)` is the one that is there as the image ships. Debian's `master.cf`
+gives it and `virtual(8)` the only two `n` entries in the unprivileged column,
+so `master` runs them as root rather than as `postfix`, and unchrooted. The
+default `mydestination=localhost` puts them on the path: an address at
+`localhost` is a destination this relay accepts for itself, so any client the
+default `mynetworks=0.0.0.0/0` lets in can have a message delivered by a root
+process without authenticating. Narrowing `mynetworks`, which
+[Securing the relay](#securing-the-relay) recommends, does not close that --
+an authorized *destination* is authorized whoever the client is.
+
+Setting `POSTFIX_mydestination=` empty is what does: an address at `localhost`
+is then a destination like any other, handed to the unprivileged chrooted
+`smtp` client instead. Measured both ways on the built image, with a message
+from outside the container to `root@localhost`: as shipped,
+`relay=local, status=sent`; with `mydestination` empty, no `local` process
+runs at all and the same message leaves through `smtp`. That is what a relay
+which delivers nothing locally wants, and it is not the default.
+
+Setting `SASL_Passwds` adds the other: `saslauthd` runs as root and checks the
+username and password an SMTP client sent, through PAM.
 That is what it is for, and it is why the directory holding its socket is
 created `root:sasl` mode `710` rather than left at the world-writable mode
 `saslauthd` gives the socket itself -- an unauthenticated password check
 reachable by every uid in the container would be an oracle for guessing at the
-passwords. Nothing to configure, but worth knowing before deciding what a
-relay of yours may do.
+passwords.
 
 Either way, most of what docker grants the container by default is unused and
 can be taken away:
