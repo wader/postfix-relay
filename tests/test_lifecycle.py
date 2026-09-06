@@ -115,12 +115,50 @@ def test_local_mailboxes_are_not_taken_over(postfix_factory):
     wait_for_file(relay, '/var/mail/root', 'Subject: local delivery')
     assert container_exec(relay, ["stat", "-c", "%U:%G", "/var/mail/root"]).strip() == 'root:mail'
 
+    # local(8) appends before it releases the mailbox's dotlock, so the file
+    # already holds the text a moment before the delivery agent has finished
+    # and logged "status=sent". Restarting in that window can catch local(8)
+    # mid-delivery -- issue #372 was found from exactly that race, on a run
+    # unrelated to this test. Waiting for the log line closes it.
+    wait_for_log(relay, 'status=sent')
+
     restart(relay)
 
     send(relay, recipients=('root@localhost',), subject='local delivery after restart')
 
     wait_for_file(relay, '/var/mail/root', 'Subject: local delivery after restart')
     assert container_exec(relay, ["stat", "-c", "%U:%G", "/var/mail/root"]).strip() == 'root:mail'
+
+
+def test_a_stale_mailbox_lock_from_an_unclean_stop_is_cleared(postfix_factory):
+    """A container killed mid local-delivery leaves a dotlock local(8) never
+    revisits, which wedges that mailbox for good (issue #372).
+
+    mailbox_delivery_lock defaults to "fcntl, dotlock": local(8) locks the
+    mailbox for the append and removes the lock when it is done. Simulating
+    the file a kill leaves behind, rather than timing an actual kill, is what
+    makes the reproduction reliable rather than racy.
+    """
+    relay = postfix_factory()
+
+    # There is nothing racy to reproduce here: the lock is what a killed
+    # local(8) would have left, whether or not a mailbox already exists.
+    container_exec(relay, ["touch", "/var/mail/root.lock"])
+
+    send(relay, recipients=('root@localhost',), subject='blocked by a stale lock')
+    wait_for_log(relay, 'unable to create lock file')
+
+    # A restart alone does not retry a deferred message -- postfix's own
+    # backoff does that on its own schedule (minimal_backoff_time, 300s by
+    # default), which is not something worth waiting out here. Forcing it is
+    # what "postqueue -f" is for, and what the two tests above already do for
+    # the same reason: what is under test is whether the retry can now
+    # succeed, not when postfix would otherwise have made it.
+    restart(relay)
+    container_exec(relay, ["postqueue", "-f"])
+
+    wait_for_file(relay, '/var/mail/root', 'Subject: blocked by a stale lock')
+    assert 'Mail queue is empty' in container_exec(relay, ["mailq"])
 
 
 def test_mail_waits_in_the_queue_until_the_relayhost_answers(postfix_factory,
