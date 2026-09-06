@@ -203,10 +203,14 @@ jobs:
     # check this repository has. This pulls what was just published, the way a
     # user pulls it, and runs the smoke tests against it.
     #
-    # Only where there was a publication to check: the step above pushes latest
-    # on master and nowhere else. Nothing is rolled back if this fails -- the
-    # tag is already out -- but a red check on master is the difference between
-    # knowing and not.
+    # Only where there was a publication to check: this job runs on master,
+    # where the build pushed the branch name and "sha-<commit>". Other branches
+    # push their own tags, and a tag ref copies the release tags onto an image
+    # master already published -- neither is the artefact this is about. What
+    # none of them writes is latest: "Publish latest" moves that afterwards,
+    # and only on the strength of this job and its arm64 twin. So a red check
+    # here is not a report on an image users are already pulling. It keeps the
+    # tag where it was. (issue #272)
     #
     # Spelled out rather than written as a matrix, and the job below with it,
     # for the reason test.yml gives at the top of that file: the job name is
