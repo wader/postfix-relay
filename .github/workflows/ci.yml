@@ -42,6 +42,15 @@ jobs:
   docker:
     name: "Build Image"
     runs-on: ubuntu-latest
+    # Backstop, the way every job in test.yml and lint.yml carries one. Without
+    # it a job that hangs runs to github's default of six hours, and this is the
+    # one required check that reaches for the network on three architectures: a
+    # buildx that never returns would hold a pull request for those six hours
+    # and, on master, keep the two verification jobs and the promotion waiting
+    # behind it. 45 is what "Pytest (arm/v7, emulated)" is given for building
+    # one emulated architecture; this builds two and pushes them, and takes
+    # about half a minute when the layer cache holds.
+    timeout-minutes: 45
     outputs:
       # What the jobs below pull and what "Publish latest" promotes. A digest
       # rather than a tag: it names this run's image and cannot be moved by

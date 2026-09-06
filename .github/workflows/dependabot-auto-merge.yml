@@ -46,6 +46,9 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
+    # Backstop. Two API calls, and nothing here should ever sit for github's
+    # default six hours.
+    timeout-minutes: 5
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata

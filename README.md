@@ -559,6 +559,13 @@ mail._domainkey.smtp.domain.tld. IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
 	  "j5joTnYwat4387VEUyGUnZ0aZxCERi+ndXv2/wMJ0tizq+a9+EgqIb+7lkUc2XciQPNuTujM25GhrQBEKznvHyPA6fHsFheymOuB763QpkmnQQLCxyLygAY9mE/5RY+5Q6J9oDOQIDAQAB" )  ; ----- DKIM key mail for smtp.domain.tld
 ```
 
+A key restored on its own — a backup that kept the `.private` and not the
+`.txt` — signs just as well, and its record is rebuilt from the key and printed
+with the others rather than going missing at the moment you are looking for it.
+It is printed and not written back, so nothing lands in your volume that you
+did not put there. The rebuild is for RSA keys; an ed25519 key carries its
+public half differently, and the log says so rather than guessing.
+
 Other OpenDKIM options are set with the `OPENDKIM_<name>` variables described in
 [OpenDKIM variables](#opendkim-variables).
 
@@ -717,8 +724,11 @@ and sends it unsigned:
 - postfix is running and listening on every `inet` service in `master.cf`, so a
   submission port added with a `POSTFIXMASTER_` variable is checked too;
 - rsyslogd is running, otherwise mail is relayed without a trace;
-- OpenDKIM, PostSRSd and saslauthd are running when the environment asks for
-  them.
+- OpenDKIM, PostSRSd and saslauthd are running when they were asked for. The
+  check sees the container's environment, so a value given through a `_FILE`
+  variable is not in it: for OpenDKIM and PostSRSd it goes by what start-up
+  left on disk instead, and a relay configured that way is covered like any
+  other.
 
 Listening sockets are read from the kernel rather than connected to, so the
 check leaves nothing in the log.
