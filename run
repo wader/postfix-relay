@@ -243,7 +243,36 @@ dkimConfig()
       echo "$selector._domainkey.$domain $domain:$selector:$privateFile" >> /etc/opendkim/KeyTable
       echo "*@$domain $selector._domainkey.$domain" >> /etc/opendkim/SigningTable
 
-      cat "$txtFile"
+      # opendkim-genkey writes the record beside the key, but only the key is
+      # needed to sign. So a keys volume restored from a backup that kept the
+      # .private and not the .txt comes up signing perfectly and answers "DNS
+      # records:" with a cat error -- at the one moment someone is looking for
+      # the record, which is when they have just restored the key. It is
+      # derivable from the key, so derive it rather than say nothing.
+      #
+      # Printed, not written back: the volume is the user's, and the record is
+      # not state this needs to keep.
+      if [ -f "$txtFile" ] ; then
+        cat "$txtFile"
+      else
+        # Only RSA. opendkim also takes ed25519, whose record carries the raw
+        # public key where this carries the SubjectPublicKeyInfo openssl
+        # prints, so one derivation does not serve both. The flags either side
+        # of "p=" are the ones opendkim-genkey writes in this image rather than
+        # anything read out of the key; tests/test_dkim.py pins that by
+        # comparing the two records.
+        publicKey=$(openssl rsa -in "$privateFile" -pubout -outform DER 2> /dev/null | base64 -w0)
+        if [ -n "$publicKey" ] ; then
+          printf '%s._domainkey.%s.\tIN\tTXT\t( "v=DKIM1; h=sha256; k=rsa; "\n' \
+                 "$selector" "$domain"
+          printf '\t  "p=%s" )  ; ----- DKIM key %s for %s, rebuilt from the private key\n' \
+                 "$publicKey" "$selector" "$domain"
+        else
+          echo "There is no $txtFile beside the key and the record cannot be" \
+               "rebuilt from it, which only works for an RSA key. Signing is" \
+               "unaffected; what is missing is the record to publish." >&2
+        fi
+      fi
     done
 }
 

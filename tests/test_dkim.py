@@ -379,6 +379,43 @@ def test_a_key_brought_from_somewhere_else_is_used_as_it_is(postfix_factory, mai
     assert verifies(raw, dkim_dns_record(relay, 'example.com', 'sel1'))
 
 
+def test_a_key_without_its_record_file_still_says_what_to_publish(postfix_factory, mailpit,
+                                                                  generated_keypair):
+    """A restore that kept the .private and not the .txt is not left guessing.
+
+    Only the key is needed to sign, so such a relay comes up signing correctly
+    and reports healthy. What it used to put under "DNS records:" was the shell's
+    "No such file or directory" -- at the one moment someone is looking for the
+    record, which is when they have just restored the key. It is rebuilt from
+    the key instead.
+    """
+    private, text = generated_keypair
+
+    relay = postfix_factory(env=SIGNING, files={KEY_PATH: private})
+    log = container_log(relay)
+
+    # On stderr, which is where the shell put it: container_log is stdout only,
+    # so asserting this against the log would be an assertion that cannot fail.
+    assert 'No such file or directory' not in container_stderr(relay)
+
+    # Taken from the record's own lines and not from the whole log: rsyslogd's
+    # start-up line carries quoted attributes of its own, which a search for
+    # every quoted chunk would collect as well.
+    printed = [line for line in log.splitlines()
+               if '_domainkey' in line or line.lstrip().startswith('"p=')]
+    rebuilt = "".join(re.findall(r'"([^"]*)"', "\n".join(printed)))
+
+    # The same record opendkim-genkey wrote for this key. Joined rather than
+    # compared line by line, because the two are chunked differently and what a
+    # resolver hands a verifier is the concatenation.
+    assert rebuilt == "".join(re.findall(r'"([^"]*)"', text))
+
+    send(relay, sender='sender@example.com', subject='signed by a restored key')
+    raw = mailpit.raw(mailpit.wait_for_message('signed by a restored key')['ID'])
+
+    assert verifies(raw, rebuilt)
+
+
 def test_a_signed_message_still_verifies_after_its_envelope_is_rewritten(
         postfix_shared, mailpit):
     """DKIM and SRS turned on together, which is what a forwarder runs.

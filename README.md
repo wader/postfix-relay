@@ -559,6 +559,13 @@ mail._domainkey.smtp.domain.tld. IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
 	  "j5joTnYwat4387VEUyGUnZ0aZxCERi+ndXv2/wMJ0tizq+a9+EgqIb+7lkUc2XciQPNuTujM25GhrQBEKznvHyPA6fHsFheymOuB763QpkmnQQLCxyLygAY9mE/5RY+5Q6J9oDOQIDAQAB" )  ; ----- DKIM key mail for smtp.domain.tld
 ```
 
+A key restored on its own — a backup that kept the `.private` and not the
+`.txt` — signs just as well, and its record is rebuilt from the key and printed
+with the others rather than going missing at the moment you are looking for it.
+It is printed and not written back, so nothing lands in your volume that you
+did not put there. The rebuild is for RSA keys; an ed25519 key carries its
+public half differently, and the log says so rather than guessing.
+
 Other OpenDKIM options are set with the `OPENDKIM_<name>` variables described in
 [OpenDKIM variables](#opendkim-variables).
 

@@ -801,8 +801,10 @@ changing any of them.
     a correct narrowing of that opendkim dependency from taking `qshape` down
     on a routine base bump. `tests/test_qshape.py` exists for exactly this.
     `openssl` is named for the same class of reason: `run` uses `openssl pkey`
-    to refuse a DKIM key it cannot read, so the binary is a dependency of the
-    entrypoint rather than of any package the image happens to install.
+    to refuse a DKIM key it cannot read, and `openssl rsa` to rebuild the DNS
+    record for a key restored without its `.txt`, so the binary is a dependency
+    of the entrypoint rather than of any package the image happens to
+    install.
     (commit `2e420c4` named perl, `4a44c60` openssl)
 
 26. **The image has no `ENTRYPOINT`, only `CMD ["/root/run"]`**, which is what
