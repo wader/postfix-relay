@@ -706,8 +706,14 @@ changing any of them.
     variable; `printf -v "$var" '%s' "$(< "${!file}")"` is used because
     `$(< file)` drops trailing newlines, which a secret file is likely to end
     with and a password is unlikely to contain. An unreadable path exits 1
-    rather than starting a relay without the credential. The mechanism covers
-    exactly five prefixes — `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`,
+    rather than starting a relay without the credential, and so do the two
+    paths that get past `-r`: a directory, for which `test -r` is true while
+    `$(< some/dir)` is the empty string with a status of 0, and a file that is
+    readable and empty. Both would otherwise resolve to an empty value, which
+    nothing downstream objects to — an empty `POSTFIX_<name>` is how a
+    `Dockerfile` default is cleared on purpose — so the relay would come up
+    healthy with the thing it was told to read set to nothing. The mechanism
+    covers exactly five prefixes — `POSTFIX_`, `POSTFIXMASTER_`, `POSTMAP_`,
     `OPENDKIM_` and `POSTSRSD_`. `SASL_Passwds`, `POSTMASTER_ADDRESS` and the
     `RSYSLOG_*` variables have no `_FILE` form, and `tests/test_secrets.py`
     exercises the same five.

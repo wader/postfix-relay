@@ -156,6 +156,40 @@ def test_the_file_variable_itself_configures_nothing(settings_from_files):
     assert 'submission/inet_FILE' not in container_stderr(settings_from_files)
 
 
+def test_a_path_that_is_a_directory_stops_the_container(postfix_factory):
+    """The likeliest way to get the path wrong: the secrets directory itself.
+
+    It passes the readability check -- "test -r" is true of a directory -- and
+    "$(< some/dir)" is the empty string with a status of 0, so without a check
+    of its own this starts a relay whose credential is the empty string.
+
+    The directory is made by putting the secret where it belongs, which is what
+    the mistake looks like in practice: the file is there, the variable names
+    the directory holding it.
+    """
+    relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': '/run/secrets'},
+                            files={SECRET: SASL_PASSWD},
+                            wait_ready=False)
+
+    assert exit_code_within(relay, seconds=30) == 1
+    assert 'which is not a file' in container_stderr(relay)
+
+
+def test_an_empty_file_stops_the_container(postfix_factory):
+    """The same failure through the last door: readable, a file, and empty.
+
+    An empty value is how a POSTFIX_ variable clears a Dockerfile default on
+    purpose, so nothing downstream objects to one -- the relay would come up
+    healthy with the credential it was told to read set to nothing.
+    """
+    relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': SECRET},
+                            files={SECRET: ''},
+                            wait_ready=False)
+
+    assert exit_code_within(relay, seconds=30) == 1
+    assert 'which is empty' in container_stderr(relay)
+
+
 def test_a_domain_list_from_a_file_is_watched_by_the_health_check(postfix_factory):
     relay = postfix_factory(env={'OPENDKIM_DOMAINS_FILE': '/run/secrets/dkim_domains'},
                             files={'/run/secrets/dkim_domains': "example.com\n"})
