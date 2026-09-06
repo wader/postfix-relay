@@ -342,6 +342,15 @@ rm -f \
   /run/rsyslogd.pid \
   /var/spool/postfix/pid/master.pid
 
+# local(8) dot-locks a mailbox for the append (mailbox_delivery_lock defaults
+# to "fcntl, dotlock"), and a container killed mid-delivery leaves that lock
+# on disk with nothing left running to hold it. Postfix's own retries never
+# clear it -- the lock is per mailbox, not per message, so every later
+# delivery to that recipient fails with "unable to create lock file ... File
+# exists" and stays deferred, for ever. This runs before postfix starts, so
+# nothing can be holding one legitimately yet.
+rm -f /var/mail/*.lock
+
 # A queue mounted from a host directory hides /var/spool/postfix/dev, which
 # ships in the image, empty, and is where rsyslog opens the log socket the
 # chrooted postfix daemons write to. Nothing else recreates it: it has no entry
