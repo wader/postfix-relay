@@ -15,7 +15,8 @@ import pytest
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 
-from tests.helpers import (esmtp_features, image_run, listening_ports, postconf,
+from tests.helpers import (container_exec, esmtp_features, image_run, listening_ports,
+                           postconf,
                            process_running, send, wait_for_log)
 
 # A next hop whose certificate is signed by a CA of our own, so that trusting
@@ -121,6 +122,27 @@ def test_the_relay_is_open(postfix):
     """Documented, and the reason the README says not to expose the container."""
     assert postconf(postfix, 'mynetworks') == '0.0.0.0/0'
     assert postconf(postfix, 'mydestination') == 'localhost'
+
+
+def test_which_postfix_daemons_master_keeps_privileged(postfix):
+    """The README's "What runs as root" table, from master.cf rather than prose.
+
+    Column four is the unprivileged column: "n" means master runs the service
+    as root instead of as mail_owner, and Debian sets it on local(8) and
+    virtual(8) alone. Column five is the chroot, which is "n" for those two and
+    for qmgr and proxymap. Both are facts about the master.cf the base image
+    ships, so a suite bump can change them under a section of the README whose
+    whole purpose is to say what a relay of yours may be allowed to do.
+    """
+    services = [line.split() for line in
+                container_exec(postfix, ["postconf", "-M"]).splitlines() if line.strip()]
+
+    privileged = sorted({s[0] for s in services if s[3] == 'n'})
+    unchrooted = sorted({s[0] for s in services if s[4] == 'n'})
+
+    assert privileged == ['local', 'virtual'], privileged
+    assert unchrooted == ['local', 'postlog', 'proxymap', 'proxywrite', 'qmgr',
+                          'virtual'], unchrooted
 
 
 def test_nothing_is_signed(postfix, mailpit):
