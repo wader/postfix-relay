@@ -56,8 +56,18 @@ def test_every_required_check_names_a_job_that_exists():
 
 def test_the_ruleset_still_gates_the_default_branch():
     """A re-export made after fiddling in the web UI can bring back a file
-    that records a gate which does not gate."""
+    that records a gate which does not gate.
+
+    Every way it can stop gating while still parsing, so that the file being
+    re-importable is not mistaken for it being the same file: disabled or in
+    "evaluate" mode, aimed at something other than the default branch, the
+    default branch excluded again underneath, opened to a bypass actor, or the
+    one rule replaced by a type that gates nothing.
+    """
     recorded = ruleset()
+    assert recorded["target"] == "branch"
     assert recorded["enforcement"] == "active"
     assert recorded["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
+    assert recorded["conditions"]["ref_name"]["exclude"] == []
     assert recorded["bypass_actors"] == []
+    assert [r["type"] for r in recorded["rules"]] == ["required_status_checks"]
