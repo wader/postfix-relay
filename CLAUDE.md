@@ -50,7 +50,7 @@ why merge commits name someone else's namespace.
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F,B tests` — pyflakes and bugbear over all the python in the tree. The only two linters there are, and neither reads a config file. |
-| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with no `pull_request` trigger, and the only one with a `schedule:`. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker. |
+| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `SECURITY.md` | Where to report a vulnerability, and — the half that is actually load-bearing — what is *not* one here: the open relay default (invariant 23), no client TLS, starting as root, and a scanner row with no fixed version. Without that, a policy invites reports about behaviour the README documents as deliberate. Names no address: it points at github's private vulnerability reporting, which needs a repository setting rather than a file. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
@@ -412,8 +412,10 @@ Notes a contributor will hit:
   arrives. Three `master` runs of `test.yml` were cancelled that way on
   5 September, before a single job of theirs started. So the group itself
   carries the commit on `master`, which is what keeps master runs from queueing
-  behind each other at all. `scan.yml` is the only one with a `schedule:`, and
-  the only one with no `pull_request` trigger.
+  behind each other at all. `scan.yml` is the only one with a `schedule:`. It
+  is not the only one without a `pull_request` trigger — `test-results.yml`
+  has none either — but that one still reaches a pull request, through its
+  `workflow_run` on `test`, where `scan.yml` reaches one by no route at all.
 - Version skew: CI pins Python 3.13, and nothing pins a Python version locally.
   The Python dependencies are pinned exactly (`tests/requirements.txt`); their
   transitive dependencies are not, and there is no lock file, so a run can
@@ -551,10 +553,16 @@ changing any of them.
    printed. And the opendkim and postsrsd conditions fall back to on-disk
    artefacts (`/etc/opendkim/KeyTable`, the marker in `/etc/default/postsrsd`)
    because a value read from a `<name>_FILE` exists only in the entrypoint's
-   environment, not in the check's; `saslauthd` has no such artefact and is
-   environment-only. `procps` is in the package list for the `pgrep` both
-   scripts use. The `HEALTHCHECK` options are asserted by `tests/test_image.py`,
-   and `--start-period=15s` is what keeps start-up out of the verdict.
+   environment, not in the check's; `saslauthd` needs no such fallback and is
+   environment-only. That is not for want of an artefact — it leaves
+   `/etc/postfix/sasl/smtpd.conf`, `/etc/pam.d/smtp` and the mux directory
+   behind — but because `SASL_Passwds` has no `_FILE` form (17), so the
+   variable the check reads is the one that decided it. Keying on the first
+   two would be wrong as well as unnecessary: the README tells users to mount
+   them (20), so they are there on relays that never asked for saslauthd.
+   `procps` is in the package list for the `pgrep` both scripts use. The
+   `HEALTHCHECK` options are asserted by `tests/test_image.py`, and
+   `--start-period=15s` is what keeps start-up out of the verdict.
    (commits `d22e380`, `e83e94a`)
 
 7. **The SMTP greeting probe lives in `run`, once per container — not in the
@@ -605,9 +613,12 @@ changing any of them.
    of those rather than the exception.
 
 9. **`run` ends in a `pgrep -x` polling loop, not a bare `wait`.** rsyslogd is
-   the only daemon that is a child of the script, so the bare `wait` this
-   replaced watched one daemon out of five while the container went on relaying
-   when any of the other four died. Polling needs nothing beyond reading
+   the only daemon that is a *job* of the script, which is not the same as the
+   only one that is a child of it: every other daemon forks and its starter
+   exits, so it reparents to pid 1 — this script — and bash has no job for it.
+   `wait` returns for a job and not for a reparented child, so the bare `wait`
+   this replaced watched one daemon out of five while the container went on
+   relaying when any of the other four died. Polling needs nothing beyond reading
    `/proc` — signalling a daemon that dropped to its own user would need a
    capability the README asks deployments to drop. What is watched is the
    `supervised` list, appended to as each daemon is *confirmed* started, rather

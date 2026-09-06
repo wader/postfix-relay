@@ -536,9 +536,11 @@ if [ -n "$smtpdPort" ] && ! awaitGreeting "$smtpdAddress" "$smtpdPort" ; then
   exit 1
 fi
 
-# rsyslogd is the only one of them that is a child of this script, so the bare
-# "wait" this replaces was watching one daemon out of five and the container
-# went on relaying when any of the other four died (issue #176). Polling
+# rsyslogd is the only one of them that is a job of this script -- the other
+# four daemonise, so their starter exits and they reparent to pid 1, which is
+# this script, and bash has no job to wait on. The bare "wait" this replaces
+# was therefore watching one daemon out of five and the container went on
+# relaying when any of the other four died (issue #176). Polling
 # "pgrep -x", the way the health check does, watches all of them and needs
 # nothing beyond reading /proc -- signalling a daemon that dropped to its own
 # user would need a capability the README asks deployments to drop.
