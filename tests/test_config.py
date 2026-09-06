@@ -10,7 +10,8 @@ import smtplib
 import pytest
 
 from tests.helpers import (container_exec, container_log, esmtp_features,
-                           listening_ports, postconf, send, smtp_connect, wait_for_log)
+                           listening_ports, postconf, send, send_raw, smtp_connect,
+                           wait_for_log)
 
 
 def test_postfix_variables_configure_main_cf(postfix_factory, mailpit):
@@ -195,13 +196,26 @@ def test_a_second_table_is_written_too(tables):
 
 
 def test_header_checks_read_the_table_that_was_written(tables, mailpit):
-    """The table is not only on disk, postfix acts on it."""
-    send(tables, recipients=('receiver@routed.example',), subject='checked headers',
-         body='body')
+    """The table is not only on disk, postfix acts on it.
+
+    "send" composes a message from Subject, From and To, so it cannot carry
+    the header the rule in TABLES is written to strip; asserting that header
+    is absent from a message that never had it passes on a relay with no
+    header_checks at all. "send_raw" is here for exactly this -- the test is
+    about the bytes -- and the second header is the control: something has to
+    survive, or a relay that dropped every header would pass this too.
+    """
+    send_raw(tables,
+             'Subject: checked headers\r\n'
+             'X-Internal-Note: not for the recipient\r\n'
+             'X-Application: invoice-service\r\n'
+             '\r\nbody\r\n',
+             recipients=('receiver@routed.example',))
 
     message = mailpit.wait_for_message('checked headers')
 
     assert 'x-internal-note' not in message['headers']
+    assert message['headers']['x-application'] == ['invoice-service']
 
 
 def test_every_domain_the_table_names_is_routed(tables, mailpit):
