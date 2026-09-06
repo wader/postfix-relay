@@ -111,6 +111,28 @@ def test_the_file_wins_when_the_variable_is_also_set(postfix_factory):
     assert 'POSTMAP_sasl_passwd is also set' in container_log(relay)
 
 
+def test_the_whitespace_a_secret_file_ends_with(postfix_factory):
+    """Trailing newlines go, however many; a trailing space stays.
+
+    Both halves rest on one line of "run" -- printf -v "$var" '%s'
+    "$(< "${!file}")" -- and every other secret file in this module ends in
+    exactly one newline and no space, which is the single case a correct
+    reader and a whitespace-stripping one agree on. The asymmetry is the
+    half that bites: an editor that leaves a blank line at the end is
+    harmless, and a password with a space appended fails to authenticate
+    with nothing in the log to say why, so a tidy-up that trimmed both
+    would look like an improvement.
+    """
+    relay = postfix_factory(
+        env={'POSTMAP_sasl_passwd_FILE': SECRET},
+        files={SECRET: f"{UPSTREAM} {USER}:{PASSWORD} \n\n\n"})
+
+    # The POSTMAP loop writes the resolved value with echo, so the table is
+    # the value plus the one newline echo adds -- no others, and the space.
+    assert container_exec(relay, ["cat", "/etc/postfix/sasl_passwd"]) == \
+        f"{UPSTREAM} {USER}:{PASSWORD} \n"
+
+
 def test_a_path_that_cannot_be_read_stops_the_container(postfix_factory):
     relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': '/run/secrets/not_mounted'},
                             wait_ready=False)
@@ -154,6 +176,40 @@ def test_the_file_variable_itself_configures_nothing(settings_from_files):
     assert 'myhostname_FILE' not in \
         container_exec(settings_from_files, ["cat", "/etc/postfix/main.cf"])
     assert 'submission/inet_FILE' not in container_stderr(settings_from_files)
+
+
+def test_a_path_that_is_a_directory_stops_the_container(postfix_factory):
+    """The likeliest way to get the path wrong: the secrets directory itself.
+
+    It passes the readability check -- "test -r" is true of a directory -- and
+    "$(< some/dir)" is the empty string with a status of 0, so without a check
+    of its own this starts a relay whose credential is the empty string.
+
+    The directory is made by putting the secret where it belongs, which is what
+    the mistake looks like in practice: the file is there, the variable names
+    the directory holding it.
+    """
+    relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': '/run/secrets'},
+                            files={SECRET: SASL_PASSWD},
+                            wait_ready=False)
+
+    assert exit_code_within(relay, seconds=30) == 1
+    assert 'which is not a file' in container_stderr(relay)
+
+
+def test_an_empty_file_stops_the_container(postfix_factory):
+    """The same failure through the last door: readable, a file, and empty.
+
+    An empty value is how a POSTFIX_ variable clears a Dockerfile default on
+    purpose, so nothing downstream objects to one -- the relay would come up
+    healthy with the credential it was told to read set to nothing.
+    """
+    relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': SECRET},
+                            files={SECRET: ''},
+                            wait_ready=False)
+
+    assert exit_code_within(relay, seconds=30) == 1
+    assert 'which is empty' in container_stderr(relay)
 
 
 def test_a_domain_list_from_a_file_is_watched_by_the_health_check(postfix_factory):

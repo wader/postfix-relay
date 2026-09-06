@@ -136,10 +136,28 @@ secretsFromFiles()
         echo "$file points at '${!file}', which cannot be read." >&2
         exit 1
       fi
+      # "test -r" is true of a directory, and "$(< some/dir)" is the empty
+      # string with a status of 0 and nothing on stderr. So a path naming the
+      # secrets directory rather than the secret inside it -- the likeliest way
+      # to get this wrong -- would pass the check above and resolve to nothing.
+      if [ ! -f "${!file}" ] ; then
+        echo "$file points at '${!file}', which is not a file." >&2
+        exit 1
+      fi
 
       # $(< file) drops trailing newlines, which a secret file is likely to
       # end with and a password is unlikely to contain.
       printf -v "$var" '%s' "$(< "${!file}")"
+      # The same failure arriving by the last door left open: a file that is
+      # there, readable and empty. Nothing downstream would object -- an empty
+      # value is how a POSTFIX_ variable clears a Dockerfile default on purpose
+      # -- so the relay would come up healthy with the credential, domain or
+      # key it was told to read set to nothing. Clearing a default deliberately
+      # is what the plain variable is for and is untouched by this.
+      if [ -z "${!var}" ] ; then
+        echo "$file points at '${!file}', which is empty." >&2
+        exit 1
+      fi
       export "${var?}"
       # Unset so that the loops below don't also configure "<name>_FILE".
       unset "$file"

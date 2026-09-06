@@ -200,7 +200,9 @@ secrets:
 
 The file wins when `<name>` is set as well, which is what happens whenever the
 variable is one the image gives a default to, and the container says so in its
-log. A path that cannot be read stops the container.
+log. A path that cannot be read stops the container, and so does one that
+names a directory or an empty file: an empty value would otherwise start a
+relay whose credential, domain or key is nothing at all.
 
 ### Relaying through another SMTP server
 
