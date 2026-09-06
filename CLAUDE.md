@@ -69,8 +69,8 @@ Dockerfile ──FROM──> debian:trixie-<date>-slim
     ├──COPY──> run          -> /root/run          <- CMD
     └──COPY──> healthcheck  -> /root/healthcheck  <- HEALTHCHECK
 
-.dockerignore excludes .git, README.md, LICENSE, tests, pytest.ini,
-                     CLAUDE.md, .claude
+.dockerignore excludes .git, README.md, SECURITY.md, LICENSE, tests,
+                     pytest.ini, CLAUDE.md, .claude
     => nothing under tests/, and neither pytest.ini nor this document, can
        invalidate the build cache
 
