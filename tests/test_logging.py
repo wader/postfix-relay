@@ -66,6 +66,35 @@ def test_rsyslog_d_configuration_is_included(postfix_factory, mailpit):
     assert wait_for_file(relay, '/var/log/from-include.log', 'status=sent')
 
 
+def test_an_include_keeps_the_rsyslog_default_format(postfix_factory, mailpit):
+    """RSYSLOG_TIMESTAMP does not reach a .conf file of your own.
+
+    It is the same relay as the test above, read for its format rather than
+    its content: the container log has no timestamps here, the include's
+    file does. The property is an ordering -- "run" emits the include above
+    the $template pair, and a directive applies only to actions written
+    after it -- so tidying the include down next to the other file actions
+    would make the README's sentence false with nothing else failing. That
+    tidy-up would look like it was tightening invariant 12, which is about
+    the same pair one line further up.
+    """
+    relay = postfix_factory(
+        files={'/etc/rsyslog.d/99-test.conf': 'mail.* /var/log/from-include.log\n'})
+
+    send(relay, subject='format from an include')
+    mailpit.wait_for_message('format from an include')
+    assert wait_for_file(relay, '/var/log/from-include.log', 'status=sent')
+
+    included = [line for line in
+                container_exec(relay, ["cat", "/var/log/from-include.log"]).splitlines()
+                if 'postfix/' in line]
+
+    assert included, "the include logged nothing to read a format from"
+    assert all(TIMESTAMPED_MAIL_LOG_LINE.match(line) for line in included), included[:3]
+    assert all(MAIL_LOG_LINE.match(line) for line in postfix_log_lines(relay)), \
+        "the container log should still be the untimestamped one"
+
+
 def test_an_existing_rsyslog_conf_is_left_alone(postfix_factory, mailpit):
     """A mounted /etc/rsyslog.conf replaces the generated one.
 
