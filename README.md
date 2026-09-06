@@ -717,8 +717,11 @@ and sends it unsigned:
 - postfix is running and listening on every `inet` service in `master.cf`, so a
   submission port added with a `POSTFIXMASTER_` variable is checked too;
 - rsyslogd is running, otherwise mail is relayed without a trace;
-- OpenDKIM, PostSRSd and saslauthd are running when the environment asks for
-  them.
+- OpenDKIM, PostSRSd and saslauthd are running when they were asked for. The
+  check sees the container's environment, so a value given through a `_FILE`
+  variable is not in it: for OpenDKIM and PostSRSd it goes by what start-up
+  left on disk instead, and a relay configured that way is covered like any
+  other.
 
 Listening sockets are read from the kernel rather than connected to, so the
 check leaves nothing in the log.

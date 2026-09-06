@@ -400,6 +400,9 @@ Notes a contributor will hit:
   for the emulated one). The job timeouts are backstops: a cancelled job skips
   the upload step, so the bound expected to fire is the step's. Every wait in
   the suite is bounded, so overrunning it means something is stuck, not slow.
+  Every job in the repository carries one — thirteen of thirteen — which is
+  not a style rule: a job without it runs to github's default of six hours,
+  and the three that had none included **Build Image**, a required check.
 - **One action is pinned to a commit**, `EnricoMi/publish-unit-test-result-action`
   in `test-results.yml`; everything else is on a major tag, and Dependabot's
   weekly `github-actions` ecosystem bumps them. Do not "normalise" that
