@@ -9,7 +9,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The group carries the commit on master, so a master run never queues
+  # behind another one. cancel-in-progress alone did not buy that: it
+  # protects a run that is already going, while github keeps at most one run
+  # pending per group and cancels that one the moment a third arrives. Three
+  # master runs of this workflow went that way on 5 September, before a single
+  # job of theirs started.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.ref == 'refs/heads/master' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 # The three jobs that run pytest are spelled out rather than written as one
