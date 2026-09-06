@@ -135,6 +135,35 @@ def test_user_supplied_canonical_maps_are_kept(postfix_factory):
     assert postconf(relay, 'recipient_canonical_maps') == 'tcp:127.0.0.1:10002'
 
 
+def test_every_canonical_setting_the_readme_names_can_be_overridden(postfix_factory):
+    """Four settings are promised, and each has its own guard in srsConfig.
+
+    The test above sets one of them, so removing any of the other three
+    guards -- which is one line each, and CLAUDE.md invariant 2 exists
+    because they look removable -- silently overwrote a user's value with
+    the suite still green. The classes are the pair worth having here
+    rather than the maps alone: they are what decides whether the visible
+    From: is rewritten along with the envelope, and the answer the image
+    picked for them is deliberate.
+    """
+    supplied = {
+        'POSTFIX_sender_canonical_maps': 'hash:/etc/postfix/sender_canonical',
+        'POSTFIX_sender_canonical_classes': 'envelope_sender,header_sender',
+        'POSTFIX_recipient_canonical_maps': 'hash:/etc/postfix/recipient_canonical',
+        'POSTFIX_recipient_canonical_classes': 'envelope_recipient',
+    }
+    relay = postfix_factory(env={
+        'POSTSRSD_SRS_DOMAIN': SRS_DOMAIN,
+        'POSTMAP_sender_canonical': '@example.com noreply@example.com',
+        'POSTMAP_recipient_canonical': '@example.com inbox@example.com',
+        **supplied,
+    })
+
+    for variable, value in supplied.items():
+        setting = variable[len('POSTFIX_'):]
+        assert postconf(relay, setting) == value, setting
+
+
 @pytest.fixture
 def shared_srs_relay(postfix_shared):
     """Rewriting relay shared by the tests that only read it back."""
