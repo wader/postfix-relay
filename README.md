@@ -933,11 +933,13 @@ When a test fails, the log of the containers it used is part of the pytest
 output.
 
 `run` and `healthcheck` are shell rather than python, so the suite does not
-read them. Continuous integration runs shellcheck over both, and a pull
-request that introduces a shellcheck *error* in either is rejected:
+read them. Continuous integration runs shellcheck over both -- and over the
+session-start hook under `.claude/`, which ships nowhere but passes the same
+threshold anyway -- and a pull request that introduces a shellcheck *error*
+in any of them is rejected:
 
 ```bash
-shellcheck -S error run healthcheck
+shellcheck -S error run healthcheck .claude/hooks/session-start.sh
 ```
 
 That threshold is the whole gate. Warnings and notes below it are left
