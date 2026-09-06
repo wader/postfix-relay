@@ -13,5 +13,6 @@ from tests.helpers import container_exec
 def test_qshape_reports_on_the_queues(postfix):
     output = container_exec(postfix, ["qshape"])
 
-    # The header row of an empty deferred queue summary.
+    # The totals row of an empty summary -- the header row is the age
+    # buckets. With no queue named, qshape reports on incoming and active.
     assert "TOTAL" in output

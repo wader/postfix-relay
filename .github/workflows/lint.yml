@@ -89,14 +89,16 @@ jobs:
   # which is a defect that survives review and then bites once per process
   # rather than once per call. What the two leave out is not small -- E501 would
   # impose a line length the suite has never had, I001 would reorder the imports
-  # of seventeen files, and "ruff format" would rewrite most of them -- and none
-  # of it is a defect today. The measured cost of each is in #304.
+  # of most of the files that have any, and "ruff format" would rewrite most of
+  # them -- and none of it is a defect today. The measured cost of each is in
+  # #304.
   #
   # The selection is written out rather than inherited from ruff's default,
-  # because that default is a moving target: on this tree, unchanged, it is two
-  # findings under ruff 0.15.8 and twenty-eight under 0.16.6. "--select F" is
-  # the same on both. Pinning the version is only half of not surprising an
-  # unrelated pull request; naming the rules is the other half.
+  # because that default is a moving target: on this tree, unchanged, it finds a
+  # couple of things under ruff 0.15.8 and more than ten times as many under
+  # 0.16.6, while "--select F,B" is clean on both. Pinning the version is only
+  # half of not surprising an unrelated pull request; naming the rules is the
+  # other half.
   #
   # --no-cache keeps ruff from leaving a .ruff_cache/ in the checkout, which is
   # the reason the binary is unpacked into RUNNER_TEMP as well: the tree a step

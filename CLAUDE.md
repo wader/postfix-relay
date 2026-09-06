@@ -255,16 +255,18 @@ code someone would write differently, and they are what the suite passes with
 no edit to any `.py` file. `B` was added by #304 because it costs nothing here
 and buys `B006`, a mutable default argument — a defect that survives review and
 then bites once per process rather than once per call. `B` is the bugbear
-linter and not every code starting with that letter: measured with `--ignore-noqa`,
-`--select B` does not reach the `BLE001` below, which `--select BLE` does. The one worth naming is `F811`, a test function replaced by a later
-one of the same name — pytest collects the second, the first one's assertions
-never run, and nothing says so. What `F` does *not* buy is worth knowing too:
-a fixture nobody requests is invisible to every pyflakes-family tool, a helper
-whose signature drifted needs pylint, and a module-level function nobody calls
-is seen at no ruff selection at all, `ALL` included — pyflakes reports unused
-imports and unused locals, not that. (#268, which asked for the gate, names all
-three as the thing it would catch.) The tree had one of those, `file_missing`,
-until #305 gave it the caller it was written for.
+linter and not every code starting with that letter: measured with
+`--ignore-noqa`, `--select B` does not reach the `BLE001` below, which
+`--select BLE` does. The one worth naming is `F811`, a test function replaced
+by a later one of the same name — pytest collects the second, the first one's
+assertions never run, and nothing says so. What `F` does *not* buy is worth
+knowing too: a fixture nobody requests is invisible to every pyflakes-family
+tool, a helper whose signature drifted needs pylint, and a module-level
+function nobody calls is seen at no ruff selection at all, `ALL` included —
+pyflakes reports unused imports and unused locals, not that. (#268, which
+asked for the gate, names all three as the thing it would catch.) The tree had
+one of those, `file_missing`, until #305 gave it the caller it was written
+for.
 
 Widening past those two is a deliberate edit and it is not free: `E` imposes a
 line length the suite has never had, `I` reorders the imports of most of the
@@ -274,9 +276,11 @@ measured menu — every selection with its finding count, so the next person nee
 not re-derive it — is #304. Deliberately not repeated here: those counts move
 with every merge, and what they are being used to say does not. The selection
 is written out rather than left to ruff's default for the same reason the
-version is pinned: on this tree, unchanged, the default is two findings under
-ruff 0.15.8 and twenty-eight under 0.16.6, while the named rules are the same on
-both. Nothing bumps that pin either.
+version is pinned: on this tree, unchanged, that default finds a couple of
+things under ruff 0.15.8 and more than ten times as many under 0.16.6, while
+`F,B` is clean on both. A ratio rather than two counts, for the reason the
+sentence above gives: it is the gap that is being pointed at, and the gap does
+not move. Nothing bumps that pin either.
 
 There is still no linter *configuration* anywhere in the repo (no
 `.shellcheckrc`, `.hadolint.yaml`, `pyproject.toml`, `setup.cfg`, `tox.ini`,
@@ -777,7 +781,8 @@ changing any of them.
     a server certificate against, so the two security levels that authenticate
     the next hop cannot be used at all. `CAfile` and not `CApath`, because the
     client opens it while still root, before chrooting into the queue, which a
-    directory of hashed links would not survive. (commit `8e8e89c`)
+    directory of hashed links would not survive. (commit `8e8e89c` for the
+    protocols, `d8f57a0` for the trust store)
 
 24. **`${v//__/\/}` replaces every `__`, not the first.** The README promises
     "all double `__` symbols"; the code used to substitute only the first
@@ -786,17 +791,16 @@ changing any of them.
     documented rule rather than to rely on that. (commit `90839a0`)
 
 25. **`perl` and `openssl` are named explicitly in the `Dockerfile` apt list.**
-    `perl` lands in
-    the image anyway today, but only through opendkim-tools' `perl:any`
-    dependency, which `perl-base` cannot satisfy — while `qshape`, a perl
-    script shipped in the postfix package, is named in no postfix dependency at
-    all. Naming perl adds no package and no bytes now, and keeps a correct
-    narrowing of that opendkim dependency from taking `qshape` down on a
-    routine base bump. `tests/test_qshape.py` exists for exactly this.
+    `perl` lands in the image anyway today, but only through opendkim-tools'
+    `perl:any` dependency, which `perl-base` cannot satisfy — while `qshape`,
+    a perl script shipped in the postfix package, is named in no postfix
+    dependency at all. Naming perl adds no package and no bytes now, and keeps
+    a correct narrowing of that opendkim dependency from taking `qshape` down
+    on a routine base bump. `tests/test_qshape.py` exists for exactly this.
     `openssl` is named for the same class of reason: `run` uses `openssl pkey`
     to refuse a DKIM key it cannot read, so the binary is a dependency of the
     entrypoint rather than of any package the image happens to install.
-    (commit `2e420c4`)
+    (commit `2e420c4` named perl, `4a44c60` openssl)
 
 26. **The image has no `ENTRYPOINT`, only `CMD ["/root/run"]`**, which is what
     makes `docker run --rm <image> mkpasswd …` work as the README documents,

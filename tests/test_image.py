@@ -91,8 +91,8 @@ def test_the_documented_default_is_in_the_image(environment, name, value):
 def test_the_image_sets_no_other_variables(environment):
     """A default nobody asked for configures every deployment silently.
 
-    PATH and DEBIAN_FRONTEND come from the base image and the build; the
-    rest of the environment is the list above and nothing else.
+    PATH is the base image's; the rest of the environment is the list
+    above and nothing else.
     """
     unexpected = set(environment) - {name for name, _ in DEFAULT_ENVIRONMENT} - {'PATH'}
 
