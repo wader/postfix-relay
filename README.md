@@ -535,7 +535,11 @@ domain you're sending from.
 To enable [DKIM](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail),
 specify a whitespace-separated list of domains in the environment variable
 `OPENDKIM_DOMAINS`. The default DKIM selector is "mail", but can be changed to
-"`<selector>`" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`.
+"`<selector>`" using the syntax `OPENDKIM_DOMAINS=<domain>=<selector>`. Not
+comma-separated, unlike `POSTFIX_mynetworks` or
+`POSTSRSD_SRS_EXCLUDE_DOMAINS` above — a comma is an ordinary character in a
+domain name, and an entry containing one is refused rather than signed for
+under the wrong name.
 
 At container start, RSA key pairs will be generated for each domain unless the
 file `/etc/opendkim/keys/<domain>/<selector>.private` exists.
@@ -543,9 +547,10 @@ file `/etc/opendkim/keys/<domain>/<selector>.private` exists.
 Signing that was asked for and cannot happen stops the container rather than
 being skipped, so a relay never quietly sends unsigned mail on your behalf.
 It exits with a message on stderr if a key has to be generated and cannot be
-written — a read-only `/etc/opendkim/keys` is the usual reason — or if a key
+written — a read-only `/etc/opendkim/keys` is the usual reason — if a key
 that is already there cannot be read as a private key, which is what an empty
-or truncated file looks like. If you want the
+or truncated file looks like — or if an entry in `OPENDKIM_DOMAINS` contains a
+comma. If you want the
 keys to persist indefinitely, make sure to mount a volume for
 `/etc/opendkim/keys`, otherwise they will be destroyed when the container is
 removed.
