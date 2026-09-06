@@ -184,6 +184,23 @@ def test_stopped_saslauthd_is_unhealthy(relay_factory):
     assert 'clients cannot authenticate' in output.decode()
 
 
+def test_stopped_rsyslogd_is_unhealthy(relay_factory):
+    """The one daemon every relay starts, and the only branch of the check
+    that had no test.
+
+    Nothing about the mail stops: postfix keeps accepting, signing and
+    relaying, and the only difference is that none of it is written down --
+    which is the failure an operator finds by looking for a delivery that
+    left no line.
+    """
+    relay = relay_factory()
+
+    exit_code, output = healthcheck_after_stopping(relay, "rsyslogd")
+
+    assert exit_code == 1
+    assert 'relayed unlogged' in output.decode()
+
+
 def test_a_postfix_that_is_not_running_is_unhealthy(relay_factory):
     """The first thing the check looks at, and the one failure that means
     no mail is being accepted at all."""
