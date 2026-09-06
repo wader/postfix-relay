@@ -111,6 +111,28 @@ def test_the_file_wins_when_the_variable_is_also_set(postfix_factory):
     assert 'POSTMAP_sasl_passwd is also set' in container_log(relay)
 
 
+def test_the_whitespace_a_secret_file_ends_with(postfix_factory):
+    """Trailing newlines go, however many; a trailing space stays.
+
+    Both halves rest on one line of "run" -- printf -v "$var" '%s'
+    "$(< "${!file}")" -- and every other secret file in this module ends in
+    exactly one newline and no space, which is the single case a correct
+    reader and a whitespace-stripping one agree on. The asymmetry is the
+    half that bites: an editor that leaves a blank line at the end is
+    harmless, and a password with a space appended fails to authenticate
+    with nothing in the log to say why, so a tidy-up that trimmed both
+    would look like an improvement.
+    """
+    relay = postfix_factory(
+        env={'POSTMAP_sasl_passwd_FILE': SECRET},
+        files={SECRET: f"{UPSTREAM} {USER}:{PASSWORD} \n\n\n"})
+
+    # The POSTMAP loop writes the resolved value with echo, so the table is
+    # the value plus the one newline echo adds -- no others, and the space.
+    assert container_exec(relay, ["cat", "/etc/postfix/sasl_passwd"]) == \
+        f"{UPSTREAM} {USER}:{PASSWORD} \n"
+
+
 def test_a_path_that_cannot_be_read_stops_the_container(postfix_factory):
     relay = postfix_factory(env={'POSTMAP_sasl_passwd_FILE': '/run/secrets/not_mounted'},
                             wait_ready=False)
