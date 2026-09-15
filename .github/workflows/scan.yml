@@ -221,16 +221,31 @@ jobs:
 
           # Missing the marker entirely would mean an open issue with this
           # exact title that this job did not write -- not reachable through
-          # its own create/edit, but read as attempt 0 rather than failing,
-          # so it is still picked up on the next scan instead of never again.
+          # its own create, but true of every issue this retry logic was
+          # merged onto and found already open, marker-less. Read as attempt
+          # 0 rather than failing, so it is still picked up on the next scan
+          # instead of never again.
           body=$(gh issue view "$existing" --json body --jq .body)
           attempts=$(printf '%s' "$body" | grep -oP 'rebuild-attempts=\K[0-9]+' | tail -1)
           attempts=${attempts:-0}
 
+          # sed only edits a marker that is there to find: on a body with none
+          # -- the same pre-existing-issue case the read above defaults for --
+          # substituting is a silent no-op, which is what left the very first
+          # issue this shipped against retrying attempt 1 forever, never
+          # actually written down. Appending one is the other half that read
+          # already assumed.
+          stampAttempts() {
+            if printf '%s' "$body" | grep -qP 'rebuild-attempts=[0-9]+' ; then
+              printf '%s' "$body" | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=$1/"
+            else
+              printf '%s\n\n<!-- rebuild-attempts=%s -->\n' "$body" "$1"
+            fi
+          }
+
           if [ "$attempts" -lt "$MAX_REBUILD_ATTEMPTS" ] ; then
             next=$((attempts + 1))
-            printf '%s' "$body" | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=${next}/" \
-              > "${RUNNER_TEMP}/issue.md"
+            stampAttempts "$next" > "${RUNNER_TEMP}/issue.md"
             gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
             gh issue comment "$existing" --body \
               "Still finding this. Dispatched another no-cache rebuild (attempt ${next} of ${MAX_REBUILD_ATTEMPTS}). [Scan run](${RUN_URL})"
@@ -242,8 +257,7 @@ jobs:
             # lands in the silent branch below instead of repeating this
             # comment every day the issue stays open.
             next=$((attempts + 1))
-            printf '%s' "$body" | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=${next}/" \
-              > "${RUNNER_TEMP}/issue.md"
+            stampAttempts "$next" > "${RUNNER_TEMP}/issue.md"
             gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
             gh issue comment "$existing" --body \
               "${MAX_REBUILD_ATTEMPTS} automatic rebuilds have not cleared this. Giving up on further attempts -- this needs a manual look: merge the pending base image bump if there is one, or run **ci** from the Actions tab with **Rebuild without the layer cache** ticked. [Scan run](${RUN_URL})"
