@@ -50,7 +50,7 @@ why merge commits name someone else's namespace.
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F,B tests` — pyflakes and bugbear over all the python in the tree. The only two linters there are, and neither reads a config file. |
-| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker. |
+| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker; each of the first `MAX_REBUILD_ATTEMPTS` runs that finds the issue still open also dispatches **ci.yml** on `master` with `no-cache` set, so the rebuild the issue names is already running before anyone reads it — see invariant 36. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `SECURITY.md` | Where to report a vulnerability, and — the half that is actually load-bearing — what is *not* one here: the open relay default (invariant 23), no client TLS, starting as root, and a scanner row with no fixed version. Without that, a policy invites reports about behaviour the README documents as deliberate. Names no address: it points at github's private vulnerability reporting, which needs a repository setting rather than a file. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
@@ -968,3 +968,32 @@ changing any of them.
     resolved credential into `main.cf`.
     `tests/test_config.py` asserts a `POSTFIXMASTER_` variable leaves no trace
     there, which fails under that edit and passes today. (issue #314)
+
+36. **`scan.yml` dispatches `ci.yml` itself, up to `MAX_REBUILD_ATTEMPTS`
+    times per finding, and then stops rather than trying forever.** The
+    `no-cache` rebuild invariant 34 describes as the remedy used to wait for
+    someone to read the issue and tick the box by hand; the "Open or retry the
+    finding issue" step now does it, with `gh workflow run ci.yml --ref master
+    -f no-cache=true` under the `actions: write` permission added alongside
+    `issues: write` for exactly this. Three by default: enough for a rebuild
+    that failed for an unrelated reason — a runner hiccup, a registry blip —
+    to get two more days to clear on its own before anyone has to look.
+    The count `steps.scan.outputs.count` carries is no use for pacing this: it
+    stays non-zero on every scan the issue remains open for, including the
+    ones that already gave up, so gating the dispatch on it would be the
+    "daily cron that commented every morning" mistake the step already avoids
+    for the issue itself, spent on compute instead of noise. What paces it
+    instead is state the job has nowhere else to keep, since nothing here
+    checks the repository out and a label has to already exist in the
+    repository before `gh issue edit --add-label` can set it: a
+    `<!-- rebuild-attempts=<n> -->` marker at the end of the issue body,
+    written on create, bumped by one on every retry, and bumped one further
+    on the run that reaches the cap so that run's give-up comment does not
+    repeat on every later scan while the issue stays open. That last part
+    matters as much as the retrying does — the issue is never closed by
+    giving up, only by the scan coming back clean, so a finding that outlasts
+    every automatic attempt is still exactly as visible as one the first
+    attempt never got the chance to see. Nothing here needed a change to
+    `ci.yml`: `no-cache` was already a `workflow_dispatch` input, wired into
+    both build steps, waiting for something to set it other than a person in
+    the Actions tab.

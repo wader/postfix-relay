@@ -13,10 +13,13 @@ on:
     - cron: '17 6 * * *'
   workflow_dispatch:
 
-# Everything this does to the repository, it does by filing one issue.
+# Filing one issue, and -- the first time that issue is opened for a given
+# finding -- dispatching ci.yml to fix it. actions: write is for that
+# dispatch; nothing here ever pushes a commit or a tag itself.
 permissions:
   contents: read
   issues: write
+  actions: write
 
 # Two runs must not race to file the same issue. Queue the second rather than
 # cancelling the first: the first is the one that would have opened it.
@@ -85,6 +88,11 @@ jobs:
       TRIVY_VERSION: v0.74.0
       TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       ISSUE_TITLE: "Fixable vulnerabilities in the published image"
+      # How many daily scans in a row get to dispatch a no-cache rebuild for
+      # the same finding before this stops and leaves the issue for a person.
+      # Three gives a rebuild that failed once (a runner hiccup, a registry
+      # blip) two more days to clear on its own before anyone has to look.
+      MAX_REBUILD_ATTEMPTS: 3
     steps:
       - name: Helper for custom repo name
         # The same resolution ci.yml uses to decide what to push. It has to
@@ -151,10 +159,16 @@ jobs:
         env:
           IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
 
-      - name: Open the finding issue
-        # One issue, held open for as long as the finding stands. A daily cron
-        # that commented every morning would teach everyone to filter it, so a
-        # run that finds the issue already open says nothing and leaves it be.
+      - name: Open or retry the finding issue
+        # One issue, held open for as long as the finding stands -- a daily
+        # cron that commented every morning would teach everyone to filter
+        # it, so a run that already gave up says nothing further either.
+        # Between those two is a retry: "rebuild-attempts=<n>" at the end of
+        # the issue body is the only state this job has anywhere to keep
+        # between runs (nothing here checks the repo out, and a label needs
+        # to already exist to be set), and it is what the next step and this
+        # one both read to decide whether today is a dispatch or a give-up.
+        id: issue
         if: steps.scan.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -173,29 +187,93 @@ jobs:
           # lags by enough that a daily job would file a second one.
           existing=$(gh issue list --state open --limit 100 --json number,title \
             --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number] | first // empty')
-          if [ -n "$existing" ] ; then
-            echo "Issue #${existing} is already open, leaving it alone."
+
+          if [ -z "$existing" ] ; then
+            {
+              echo "\`trivy image --ignore-unfixed --severity HIGH,CRITICAL\` found"
+              echo "vulnerabilities in \`${IMAGE}\` that Debian has already shipped a fix for."
+              echo
+              echo "The remedy is a build that re-resolves the packages, and this run has"
+              echo "already dispatched the **ci** workflow on \`master\` with"
+              echo "**Rebuild without the layer cache** ticked to do it (attempt 1 of"
+              echo "${MAX_REBUILD_ATTEMPTS}) -- see the Actions tab for its progress. If the"
+              echo "archive did not have the fix yet or that rebuild failed, tomorrow's scan"
+              echo "retries on its own, up to ${MAX_REBUILD_ATTEMPTS} attempts total; after"
+              echo "that it stops and leaves this issue open rather than trying forever. The"
+              echo "manual remedy still applies at any point: merge the pending base image"
+              echo "bump if there is one, or run **ci** again from the Actions tab with the"
+              echo "same option."
+              echo
+              echo "This issue is closed automatically once the scan comes back clean."
+              echo
+              echo "[Scan run](${RUN_URL})"
+              echo
+              echo '```'
+              head -c 50000 "${RUNNER_TEMP}/trivy.txt"
+              echo '```'
+              echo
+              echo "<!-- rebuild-attempts=1 -->"
+            } > "${RUNNER_TEMP}/issue.md"
+            gh issue create --title "${ISSUE_TITLE}" --body-file "${RUNNER_TEMP}/issue.md"
+            echo "dispatch=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          {
-            echo "\`trivy image --ignore-unfixed --severity HIGH,CRITICAL\` found"
-            echo "vulnerabilities in \`${IMAGE}\` that Debian has already shipped a fix for."
-            echo
-            echo "The remedy is a build that re-resolves the packages: merge the pending"
-            echo "base image bump if there is one, or run the **ci** workflow from the"
-            echo "Actions tab with **Rebuild without the layer cache** ticked, which"
-            echo "re-resolves every package against the archive without waiting for the"
-            echo "next \`trixie-<date>-slim\` tag."
-            echo
-            echo "This issue is closed automatically once the scan comes back clean."
-            echo
-            echo "[Scan run](${RUN_URL})"
-            echo
-            echo '```'
-            head -c 50000 "${RUNNER_TEMP}/trivy.txt"
-            echo '```'
-          } > "${RUNNER_TEMP}/issue.md"
-          gh issue create --title "${ISSUE_TITLE}" --body-file "${RUNNER_TEMP}/issue.md"
+
+          # Missing the marker entirely would mean an open issue with this
+          # exact title that this job did not write -- not reachable through
+          # its own create/edit, but read as attempt 0 rather than failing,
+          # so it is still picked up on the next scan instead of never again.
+          body=$(gh issue view "$existing" --json body --jq .body)
+          attempts=$(printf '%s' "$body" | grep -oP 'rebuild-attempts=\K[0-9]+' | tail -1)
+          attempts=${attempts:-0}
+
+          if [ "$attempts" -lt "$MAX_REBUILD_ATTEMPTS" ] ; then
+            next=$((attempts + 1))
+            printf '%s' "$body" | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=${next}/" \
+              > "${RUNNER_TEMP}/issue.md"
+            gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
+            gh issue comment "$existing" --body \
+              "Still finding this. Dispatched another no-cache rebuild (attempt ${next} of ${MAX_REBUILD_ATTEMPTS}). [Scan run](${RUN_URL})"
+            echo "Issue #${existing}: dispatching rebuild attempt ${next} of ${MAX_REBUILD_ATTEMPTS}."
+            echo "dispatch=true" >> "${GITHUB_OUTPUT}"
+          elif [ "$attempts" -eq "$MAX_REBUILD_ATTEMPTS" ] ; then
+            # The attempt that reaches the cap is the one that gets to say so
+            # -- the counter is bumped past it here too, so tomorrow's run
+            # lands in the silent branch below instead of repeating this
+            # comment every day the issue stays open.
+            next=$((attempts + 1))
+            printf '%s' "$body" | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=${next}/" \
+              > "${RUNNER_TEMP}/issue.md"
+            gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
+            gh issue comment "$existing" --body \
+              "${MAX_REBUILD_ATTEMPTS} automatic rebuilds have not cleared this. Giving up on further attempts -- this needs a manual look: merge the pending base image bump if there is one, or run **ci** from the Actions tab with **Rebuild without the layer cache** ticked. [Scan run](${RUN_URL})"
+            echo "Issue #${existing}: ${MAX_REBUILD_ATTEMPTS} attempts made, giving up automatic retries."
+            echo "dispatch=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Issue #${existing}: already gave up automatic retries, leaving it alone."
+            echo "dispatch=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Trigger a no-cache rebuild
+        # The remedy the issue above names, done here instead of waiting for
+        # someone to tick the box by hand: ci.yml's apt install reads the
+        # archive fresh, but cache-from/cache-to make that layer a cache hit
+        # until the base image tag moves, so a finding otherwise sits until
+        # the next trixie-<date>-slim bump. Dispatching it from the same run
+        # that opens or retries the issue closes that gap in minutes rather
+        # than weeks.
+        #
+        # Gated on "dispatch", not on the finding count alone -- the count
+        # stays non-zero for as long as the issue is open, including the runs
+        # that decided not to retry any more, and re-dispatching a
+        # three-architecture build on every one of those would be the
+        # daily-comment mistake the step above already avoids, spent on
+        # compute instead of noise.
+        if: steps.issue.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ci.yml --ref master -f no-cache=true
 
       - name: Close the finding issue
         # The scan is clean, so whatever this job filed earlier is answered.
