@@ -997,3 +997,15 @@ changing any of them.
     `ci.yml`: `no-cache` was already a `workflow_dispatch` input, wired into
     both build steps, waiting for something to set it other than a person in
     the Actions tab.
+    Bumping the marker is `stampAttempts`, and it has to do two different
+    things depending on what is already there: `sed` substitute an existing
+    `rebuild-attempts=<n>` in place, or append a fresh one when the body has
+    none — which every issue this retry logic was merged onto still lacked.
+    The first version only did the substitute half, so on exactly that issue
+    `sed` matched nothing, wrote the body back unchanged, and the count read
+    back as 0 every single run: the cap that is the point of this invariant
+    never engaged, and the finding retried attempt 1 forever. Caught live,
+    on issue #376, the day this shipped — the simulated day-by-day state
+    machine that found the give-up path only ever started from a body this
+    step had itself just created, so it never exercised the one state every
+    pre-existing issue was actually in.
