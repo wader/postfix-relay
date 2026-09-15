@@ -13,10 +13,13 @@ on:
     - cron: '17 6 * * *'
   workflow_dispatch:
 
-# Everything this does to the repository, it does by filing one issue.
+# Filing one issue, and -- the first time that issue is opened for a given
+# finding -- dispatching ci.yml to fix it. actions: write is for that
+# dispatch; nothing here ever pushes a commit or a tag itself.
 permissions:
   contents: read
   issues: write
+  actions: write
 
 # Two runs must not race to file the same issue. Queue the second rather than
 # cancelling the first: the first is the one that would have opened it.
@@ -155,6 +158,10 @@ jobs:
         # One issue, held open for as long as the finding stands. A daily cron
         # that commented every morning would teach everyone to filter it, so a
         # run that finds the issue already open says nothing and leaves it be.
+        # "new" records which of those two happened; the next step reads it to
+        # fire the rebuild once per finding rather than once per day it stays
+        # open.
+        id: issue
         if: steps.scan.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -175,17 +182,20 @@ jobs:
             --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number] | first // empty')
           if [ -n "$existing" ] ; then
             echo "Issue #${existing} is already open, leaving it alone."
+            echo "new=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           {
             echo "\`trivy image --ignore-unfixed --severity HIGH,CRITICAL\` found"
             echo "vulnerabilities in \`${IMAGE}\` that Debian has already shipped a fix for."
             echo
-            echo "The remedy is a build that re-resolves the packages: merge the pending"
-            echo "base image bump if there is one, or run the **ci** workflow from the"
-            echo "Actions tab with **Rebuild without the layer cache** ticked, which"
-            echo "re-resolves every package against the archive without waiting for the"
-            echo "next \`trixie-<date>-slim\` tag."
+            echo "The remedy is a build that re-resolves the packages, and this run has"
+            echo "already dispatched the **ci** workflow on \`master\` with"
+            echo "**Rebuild without the layer cache** ticked to do it -- see the Actions tab"
+            echo "for its progress. If the next scan still finds this, the archive did not"
+            echo "have the fix yet or that rebuild failed, and the same remedy applies by"
+            echo "hand: merge the pending base image bump if there is one, or run **ci**"
+            echo "again from the Actions tab with the same option."
             echo
             echo "This issue is closed automatically once the scan comes back clean."
             echo
@@ -196,6 +206,27 @@ jobs:
             echo '```'
           } > "${RUNNER_TEMP}/issue.md"
           gh issue create --title "${ISSUE_TITLE}" --body-file "${RUNNER_TEMP}/issue.md"
+          echo "new=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Trigger a no-cache rebuild
+        # The remedy the issue above names, done here instead of waiting for
+        # someone to tick the box by hand: ci.yml's apt install reads the
+        # archive fresh, but cache-from/cache-to make that layer a cache hit
+        # until the base image tag moves, so a finding otherwise sits until
+        # the next trixie-<date>-slim bump. Dispatching it from the same run
+        # that opens the issue closes that gap in minutes rather than weeks.
+        #
+        # Gated on "new", not on the finding count alone -- re-dispatching a
+        # three-architecture build every day the issue stays open would be the
+        # daily-comment mistake the step above already avoids, spent on
+        # compute instead of noise. If this run's rebuild does not clear the
+        # finding, the issue body's manual fallback is what is left: a second
+        # automatic attempt has no reason to succeed where the first did not.
+        if: steps.issue.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ci.yml --ref master -f no-cache=true
 
       - name: Close the finding issue
         # The scan is clean, so whatever this job filed earlier is answered.

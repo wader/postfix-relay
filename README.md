@@ -644,9 +644,11 @@ Pulling is also how a security fix in one of the Debian packages reaches you,
 so it is worth knowing what moves the image. There is no `apt-get upgrade` at
 start-up — a container patching itself would drift away from the image it says
 it is — and the image is instead rebuilt when its Debian base tag moves, which
-is every few weeks. A scheduled job scans the published image daily and opens
-an issue if it finds a vulnerability Debian has already shipped a fix for; if
-it is quiet, that is the state it is expected to be in. You do not have to take
+is every few weeks, or sooner: a scheduled job scans the published image daily,
+and the first time it finds a vulnerability Debian has already shipped a fix
+for, it opens an issue and rebuilds the image itself, re-resolving the
+packages against the archive without waiting for the next base tag. If it is
+quiet, that is the state it is expected to be in. You do not have to take
 that on trust, and your risk appetite may not be ours: the image is public, so
 
 ```
