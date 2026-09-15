@@ -13,8 +13,30 @@ LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com
 # openssl is spelled out for the same reason: "run" uses it to refuse a DKIM
 # key it cannot read, and it is in the image today only because ca-certificates
 # depends on it.
+#
+# full-upgrade is what makes a no-cache rebuild (scan.yml's remediation lever,
+# invariant 34) actually re-resolve every package rather than only the ones
+# named below. "apt-get install <names>" upgrades a named package and pulls in
+# whatever new dependencies it needs, but it never touches a package the base
+# image already has installed that is not named here and that nothing new
+# depends on a newer version of -- gzip, libpcre2-8-0 and libsqlite3-0 are
+# exactly that today: preinstalled in debian:trixie-<date>-slim, named nowhere
+# in this file, and left at whatever version the base image shipped even
+# against a freshly updated index, however many times the install below runs.
+# Measured directly: rerunning this file's install against the pinned base
+# with a fresh "apt-get update" left all three at their base-image version;
+# adding "apt-get -y upgrade" on top was what actually took them to the
+# archive's current one. full-upgrade goes further, the way a fix needing a
+# package split or a new dependency would need it to; apt-get and not apt,
+# for the stable, scriptable interface the rest of this file relies on
+# throughout -- apt's own manual page says as much and asks scripts to use
+# apt-get and apt-cache instead.
+# autoremove --purge is what full-upgrade can leave behind: a package it
+# replaces outright rather than upgrading in place becomes unneeded and this
+# is what clears it, config files included, before the image ships.
 RUN \
   apt-get update && \
+  apt-get -y full-upgrade && \
   apt-get -y --no-install-recommends install \
     procps \
     postfix \
@@ -31,6 +53,7 @@ RUN \
   if apt-cache show postsrsd > /dev/null 2>&1 ; then \
     apt-get -y --no-install-recommends install postsrsd ; \
   fi && \
+  apt-get -y autoremove --purge && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/* \
     /etc/rsyslog.conf \

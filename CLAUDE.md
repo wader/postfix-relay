@@ -27,7 +27,7 @@ why merge commits name someone else's namespace.
 
 | Path | Role |
 | --- | --- |
-| `Dockerfile` | Debian base pin (`FROM debian:trixie-<date>-slim`), the apt packages, the conditional `postsrsd` install, the build-time deletion of `/etc/rsyslog.conf` and `/etc/postsrsd.secret`, the default `ENV` block, `COPY run healthcheck /root/`, `VOLUME`, `EXPOSE 25`, `HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/root/healthcheck"]` and `CMD ["/root/run"]`. No `ENTRYPOINT`, no `ARG`. |
+| `Dockerfile` | Debian base pin (`FROM debian:trixie-<date>-slim`), `apt-get full-upgrade` before the named packages and `apt-get autoremove --purge` after them (invariant 37), the conditional `postsrsd` install, the build-time deletion of `/etc/rsyslog.conf` and `/etc/postsrsd.secret`, the default `ENV` block, `COPY run healthcheck /root/`, `VOLUME`, `EXPOSE 25`, `HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/root/healthcheck"]` and `CMD ["/root/run"]`. No `ENTRYPOINT`, no `ARG`. |
 | `run` | The entrypoint. Resolves `<NAME>_FILE` secrets, turns `POSTFIX_*`, `POSTFIXMASTER_*`, `POSTMAP_*`, `OPENDKIM_*`, `POSTSRSD_*`, `RSYSLOG_*`, `SASL_Passwds` and `POSTMASTER_ADDRESS` into config, starts the daemons, asks postfix for an SMTP greeting, then runs a `pgrep`-polling supervision loop. Nearly all behaviour lives here. |
 | `healthcheck` | `pgrep`s `master`, checks a listening socket for every `inet` service in `postconf -M`, then `rsyslogd` always, `opendkim`/`postsrsd` whenever the environment *or the artefacts start-up left behind* say so, and `saslauthd` when `SASL_Passwds` is set. |
 | `pytest.ini` | `addopts = -n auto --dist loadfile --maxprocesses 4` and one registered marker, `smoke`. No `testpaths`, no `filterwarnings`, no `xfail_strict`. |
@@ -947,10 +947,11 @@ changing any of them.
     inside the published image agreeing.
     The `no-cache` dispatch input on `ci.yml` is the other half and does not
     stand alone: the apt install is unversioned, so a build resolves current
-    archive versions, but `cache-from`/`cache-to` make that layer a cache hit
-    until the `FROM` line moves. Without the input, the only answer to a
-    finding is to wait two to three weeks for the next `trixie-<date>-slim`
-    tag. (issue #269)
+    archive versions for every package the image carries -- see invariant 37
+    for the "every", which took longer to be true than this paragraph did --
+    but `cache-from`/`cache-to` make that layer a cache hit until the `FROM`
+    line moves. Without the input, the only answer to a finding is to wait two
+    to three weeks for the next `trixie-<date>-slim` tag. (issue #269)
 
 35. **The trailing underscore in `${!POSTFIX_*}` is what keeps the two
     `postconf` loops apart.** Bash's `${!prefix*}` is a literal prefix test on
@@ -1009,3 +1010,35 @@ changing any of them.
     machine that found the give-up path only ever started from a body this
     step had itself just created, so it never exercised the one state every
     pre-existing issue was actually in.
+
+37. **The `Dockerfile` runs `apt-get -y full-upgrade` before the named
+    install, and `apt-get -y autoremove --purge` after it.** Without them, a
+    `no-cache` rebuild — the remedy invariant 34 and 36 both dispatch — could
+    run any number of times and still ship a package Debian has already fixed,
+    for a reason neither the workflow nor `--no-cache` has any way to see:
+    `apt-get install <names>` only installs and upgrades the packages it is
+    given and whatever new dependencies they pull in. It does not touch a
+    package the base image already has installed that is not named here and
+    that nothing newly named needs a higher version of, however fresh the
+    index `apt-get update` just fetched is. `gzip`, `libpcre2-8-0` and
+    `libsqlite3-0` are exactly that today: preinstalled in
+    `debian:trixie-<date>-slim`, named nowhere in this file, and every one of
+    #376's automatic rebuilds on 2026-09-15 rebuilt the image, re-fetched a
+    current index, and shipped the same vulnerable versions anyway — measured
+    directly, not inferred: replaying this file's install by hand against the
+    pinned base, with a fresh `apt-get update`, left all three exactly where
+    the base image put them, and only `apt-get -y upgrade` on top moved them.
+    Invariant 34 already named the right check for this — "`apt-get -s
+    full-upgrade` inside the published image agreeing" that there was nothing
+    left — without the build itself ever performing it, so the gap was
+    between what verified the image and what built it, not something either
+    half got wrong alone. `full-upgrade` over plain `upgrade` because it is
+    also what actually clears a fix that requires a package split or a
+    dependency it did not have before, rather than leaving it half-applied;
+    `autoremove --purge` is the other half of that same case, for whatever
+    `full-upgrade` orphans by replacing it outright. Verified on the built
+    image: `apt list --upgradable` after this file's install is empty, `trivy
+    image --ignore-unfixed --severity HIGH,CRITICAL` against it reports zero
+    findings where it reported five before, and the full suite still passes
+    (256 passed, 2 skipped), so nothing either command removed was something
+    this image needed. (issue #376)
