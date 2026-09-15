@@ -645,9 +645,12 @@ so it is worth knowing what moves the image. There is no `apt-get upgrade` at
 start-up — a container patching itself would drift away from the image it says
 it is — and the image is instead rebuilt when its Debian base tag moves, which
 is every few weeks, or sooner: a scheduled job scans the published image daily,
-and the first time it finds a vulnerability Debian has already shipped a fix
-for, it opens an issue and rebuilds the image itself, re-resolving the
-packages against the archive without waiting for the next base tag. If it is
+and when it finds a vulnerability Debian has already shipped a fix for, it
+opens an issue and rebuilds the image itself, re-resolving the packages
+against the archive without waiting for the next base tag. If that rebuild
+does not clear it, the same job retries automatically for a few more days
+before giving up and leaving the issue for a person to look at — it stays
+open either way until a rebuild actually clears the finding. If it is
 quiet, that is the state it is expected to be in. You do not have to take
 that on trust, and your risk appetite may not be ours: the image is public, so
 
