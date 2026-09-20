@@ -21,6 +21,7 @@ Like `test_ruleset.py` these read files and start nothing, so they are part of
 the small half of the suite that needs no docker daemon.
 """
 
+import re
 from pathlib import Path
 
 import yaml
@@ -78,13 +79,48 @@ def test_a_clean_re_scan_closes_the_issue_and_spares_the_run():
     steps = scan_steps()
     close = steps["Close the finding issue"]["if"]
     fail = steps["Fail the run"]["if"]
-    assert "steps.rescan.outputs.count == '0'" in close, (
+    assert "steps.rescan.outputs.verdict == 'clean'" in close, (
         "only the first scan can close the issue, so a run that found "
         "something, fixed it and watched the fix land still leaves it open"
     )
-    assert "steps.rescan.outputs.count != '0'" in fail, (
+    assert "steps.rescan.outputs.verdict != 'clean'" in fail, (
         "the run goes red even when its own rebuild cleared the finding, "
         "which is an email nobody has anything to act on"
+    )
+    assert "verdict=clean" in steps["Re-scan what the rebuild published"]["run"]
+
+
+def test_no_condition_reads_a_skipped_step_as_a_number():
+    """A step that did not run contributes no outputs, so a reference to one is
+    Null -- and github coerces a mismatched comparison to numbers, where Null
+    is 0 and so is the string "0", and so is the empty string. Comparing an
+    output that may not be there against a numeric literal is therefore true
+    exactly when the step did not run, which is the inverse of what such a
+    condition is ever written to mean. A word is safe because it parses as NaN
+    and NaN equals nothing, itself included.
+    """
+    workflow = yaml.safe_load(SCAN.read_text())
+    steps = workflow["jobs"]["trivy"]["steps"]
+    skippable = {s["id"] for s in steps if "if" in s and "id" in s}
+
+    numeric = []
+    for step in steps:
+        for ref, literal in re.findall(
+            r"steps\.(\w+)\.outputs\.\w+\s*[=!]=\s*'([^']*)'", step.get("if", "")
+        ):
+            if ref not in skippable:
+                continue
+            try:
+                float(literal)
+            except ValueError:
+                continue
+            numeric.append(f"{step['name']}: compares {ref}'s output against '{literal}'")
+        if "''" in step.get("if", ""):
+            numeric.append(f"{step['name']}: compares against the empty string, which coerces to 0")
+
+    assert not numeric, (
+        "these conditions are true exactly when the step they read was "
+        "skipped: " + "; ".join(numeric)
     )
 
 

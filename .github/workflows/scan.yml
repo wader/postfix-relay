@@ -69,7 +69,12 @@ concurrency:
 # rows when this was written, is perl -- in the image only so the
 # manually-invoked qshape keeps working, and executed by no relaying container.
 # With it, a red says exactly one thing: Debian shipped a fix that the
-# published image does not have.
+# published image does not have -- and, since this job now dispatches a rebuild
+# and waits for it, that the rebuild did not put that fix on the tag either.
+# Green covers two states rather than one: nothing was found, or something was
+# found, rebuilt away and verified gone inside this run. Both are states with
+# nothing for a person to do, which is what the failure email is for; the issue,
+# opened and closed, is the record that the second one happened.
 #
 # So this is expected to be green, and it was when it was written: trivy and
 # grype both reported zero fixable findings, and "apt-get -s full-upgrade"
@@ -80,7 +85,7 @@ jobs:
   trivy:
     name: "Image Scan"
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       # Pinned and checksummed, and nothing bumps it, the way lint.yml installs
       # shellcheck -- and here the reason is not hypothetical. The
@@ -390,9 +395,19 @@ jobs:
           # exists is a floor and the oldest one above it is this one's.
           # Narrowing to workflow_dispatch on master is what keeps an unrelated
           # push build, whose id would also be higher, from being taken for it.
+          # Two floors, not one. The id floor alone is the obvious version and
+          # it has a hole: a listing that comes back empty -- no prior dispatch
+          # at all on a fresh fork of this workflow, or one transient API
+          # failure -- reads as 0, and "min" then picks the OLDEST run in the
+          # window instead of the newest. That run finished days ago with
+          # conclusion "success" over the image this scan just found something
+          # in, so the wait returns at once and the re-scan is handed a tag
+          # that never moved. A created-at floor cannot be fooled that way, and
+          # two minutes of slack is for the clock rather than for the search.
           floor=$(gh run list --workflow ci.yml --branch master \
             --event workflow_dispatch --limit 1 \
-            --json databaseId --jq '.[0].databaseId // 0')
+            --json databaseId --jq '.[0].databaseId // 0' || echo 0)
+          since=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)
           gh workflow run ci.yml --ref master -f no-cache=true
 
           # The dispatch is asynchronous: the run does not exist yet when the
@@ -400,9 +415,10 @@ jobs:
           run=""
           for _ in $(seq 1 24) ; do
             run=$(gh run list --workflow ci.yml --branch master \
-              --event workflow_dispatch --limit 20 --json databaseId \
-              | jq --argjson floor "${floor}" \
-                  '[.[] | select(.databaseId > $floor) | .databaseId] | min // empty')
+              --event workflow_dispatch --limit 20 --json databaseId,createdAt \
+              | jq -r --argjson floor "${floor}" --arg since "${since}" \
+                  '[.[] | select(.databaseId > $floor and .createdAt >= $since)
+                        | .databaseId] | min // empty')
             if [ -n "$run" ] ; then
               break
             fi
@@ -424,11 +440,39 @@ jobs:
           # is room for a queue, not for a hang. A "gh run view" that fails
           # transiently is not a verdict, so it reads as "not finished yet" and
           # the deadline is what ends the wait either way.
-          deadline=$(( SECONDS + 25 * 60 ))
+          # Thirty-five minutes. A three-architecture rebuild measured six and a
+          # half before the verify jobs began running the whole suite on one
+          # and about a quarter of an hour after, and ci.yml's own bounds allow
+          # it considerably more than that; this is room for a queue -- the
+          # dispatched run shares a concurrency group with the push run for the
+          # same commit, so it can sit behind one -- and not room for a hang.
+          # It has to stay well inside the job's own timeout, because a job
+          # killed by that is *cancelled* rather than failed, which sends no
+          # notification and reaches no verdict: the one way out of here that
+          # would turn the alarm off instead of leaving it red.
+          #
+          # A failed poll is not a verdict, so it reads as "not finished yet".
+          # A run of them is a different thing from a queue, though, and
+          # counting them is what keeps a revoked token or a 403 on the actions
+          # scope from spinning silently for the whole bound and then reporting
+          # it as a slow rebuild.
+          deadline=$(( SECONDS + 35 * 60 ))
           status=""
           conclusion=""
+          unreadable=0
           while [ "${SECONDS}" -lt "${deadline}" ] ; do
-            status=$(gh run view "$run" --json status --jq .status || echo "")
+            if ! status=$(gh run view "$run" --json status --jq .status) ; then
+              unreadable=$((unreadable + 1))
+              if [ "$unreadable" -ge 5 ] ; then
+                echo "gh could not read run ${run} five polls running."
+                echo "conclusion=unreadable" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              status=""
+              sleep 20
+              continue
+            fi
+            unreadable=0
             if [ "$status" = "completed" ] ; then
               conclusion=$(gh run view "$run" --json conclusion --jq .conclusion || echo "")
               break
@@ -437,7 +481,7 @@ jobs:
           done
 
           if [ "$status" != "completed" ] ; then
-            echo "ci run ${run} was still '${status:-unknown}' after 25 minutes; not re-scanning."
+            echo "ci run ${run} was still '${status:-unknown}' when the wait ran out; not re-scanning."
             echo "conclusion=timeout" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -467,6 +511,20 @@ jobs:
         # failed. The first scan's digest can only be empty if trivy stopped
         # reporting one, so an empty one compares equal to nothing and the
         # count is used on its own.
+        #
+        # The verdict it hands on is a word and that is load-bearing, not
+        # style. A step that did not run contributes no outputs at all, so
+        # every reference to one of them is Null rather than the empty string
+        # it reads as -- and github's comparison operators coerce a mismatched
+        # pair to numbers, where Null is 0 and the string "0" is also 0. So
+        # "steps.rescan.outputs.count == '0'" is *true* on every path where
+        # this step was skipped or bailed out: a rebuild that failed, was
+        # cancelled, never appeared, outlasted the wait, or published nothing
+        # the tag points at. Gated on that, the two steps below would have
+        # closed a live vulnerability issue with "no longer has a
+        # vulnerability with a fix available" and gone green, over exactly the
+        # cases this step exists to catch. "clean" parses as NaN and NaN
+        # equals nothing, including itself, so a word cannot do that.
         id: rescan
         if: steps.rebuild.outputs.conclusion == 'success'
         env:
@@ -491,6 +549,11 @@ jobs:
           count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${RUNNER_TEMP}/rescan.json")
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
           echo "digest=${after}" >> "${GITHUB_OUTPUT}"
+          if [ "${count}" -eq 0 ] ; then
+            echo "verdict=clean" >> "${GITHUB_OUTPUT}"
+          else
+            echo "verdict=dirty" >> "${GITHUB_OUTPUT}"
+          fi
           echo "${count} finding(s) with a fix available in ${after}"
           trivy convert --format table "${RUNNER_TEMP}/rescan.json"
 
@@ -498,7 +561,7 @@ jobs:
         # A scan came back clean, so whatever this job filed earlier is
         # answered -- either the one at the top of this run, or the one after
         # the rebuild, which is the same verdict about a newer image.
-        if: steps.scan.outputs.count == '0' || steps.rescan.outputs.count == '0'
+        if: steps.scan.outputs.count == '0' || steps.rescan.outputs.verdict == 'clean'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # This job checks nothing out, on purpose -- trivy pulls the
@@ -525,7 +588,7 @@ jobs:
           # on its own, and a clean re-scan means this run's rebuild is what
           # took it away. Same verdict, different story.
           if [ -n "${CI_RUN}" ] && [ -n "${RESCAN_DIGEST}" ] ; then
-            note="Cleared by the no-cache rebuild this run dispatched and waited for ([ci run](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${CI_RUN})); \`${IMAGE}\` now resolves to \`${RESCAN_DIGEST}\`. "
+            note="This run dispatched a no-cache rebuild ([ci run](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${CI_RUN})) and waited for it; \`${IMAGE}\` has since moved to \`${RESCAN_DIGEST}\`, which scans clean. Whether that digest is the one this rebuild produced is not something this job can tell -- another master run finishing alongside it publishes the same way. "
           else
             note=""
           fi
@@ -545,13 +608,15 @@ jobs:
         # attention instead. The record is the issue, opened and closed. Every
         # other way out of the rebuild -- failed, cancelled, never appeared,
         # still timing out, or a latest that never moved -- leaves the re-scan
-        # count empty and lands here, red, exactly as before.
-        if: steps.scan.outputs.count != '0' && steps.rescan.outputs.count != '0'
+        # count empty and lands here, red, exactly as before -- and reaches
+        # that through a word rather than a number, for the reason the re-scan
+        # step sets one out.
+        if: steps.scan.outputs.count != '0' && steps.rescan.outputs.verdict != 'clean'
         env:
           COUNT: "${{ steps.scan.outputs.count }}"
-          RESCAN: "${{ steps.rescan.outputs.count }}"
+          RESCAN: "${{ steps.rescan.outputs.verdict }}"
           REBUILD: "${{ steps.rebuild.outputs.conclusion }}"
         run: |
           echo "${COUNT} finding(s) with a fix available."
-          echo "rebuild: ${REBUILD:-not dispatched}; re-scan: ${RESCAN:-did not run}"
+          echo "rebuild: ${REBUILD:-not dispatched}; re-scan: ${RESCAN:-did not reach a verdict}"
           exit 1
