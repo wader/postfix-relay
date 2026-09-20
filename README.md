@@ -908,7 +908,9 @@ All of that tests an image built from the tree. What reaches the registry is
 built by buildx rather than by the daemon the suite uses, so a push to `master`
 publishes the image under its commit before it publishes it under `latest`:
 the pushed image is pulled back on `amd64` and on `arm64` -- the way anyone
-else pulls it -- and the same smoke tests are run against it. Its manifest is
+else pulls it -- and the same smoke tests are run against it -- or the whole suite, when the
+build was a rebuild asked for without its layer cache, since that changes the
+packages under a tree nothing else re-tested. Its manifest is
 read too, and the check fails if it does not list all three architectures that
 were built: each half of the check pulls the entry for its own architecture,
 so the one with no runner is only visible there. Only then is `latest` moved
@@ -949,6 +951,7 @@ releasing something no check has seen.
 | `test_qshape.py` | The queue tool the troubleshooting section has users run |
 | `test_upgrade.py` | Starting on the state the last released image wrote, which is what the "Upgrading" section promises |
 | `test_ruleset.py` | The required status checks recorded in `.github/rulesets/master.json`, against the jobs that report them |
+| `test_ci.py` | What the build workflow runs against the image it has just published, which is not the same on a merge and on a rebuild |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and
