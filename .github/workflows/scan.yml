@@ -315,10 +315,32 @@ jobs:
             fi
           }
 
+          # The marker is the only state this job has, and it lives in a field
+          # other things write to. Nothing has been seen to strip it, but this
+          # body is not this job's alone: #381 was edited 87 seconds after this
+          # step created it, acquiring an assignee nothing here sets. And the
+          # way it fails is silent by construction -- a marker that is gone
+          # reads back as attempt 0, the budget restarts, and the cap never
+          # engages, which is the same shape as the sed no-op #379 fixed and
+          # cost a whole day of retries before anyone noticed. So the write is
+          # read back. Refusing to go on is the fail-closed answer: a run that
+          # cannot record an attempt must not spend one, because nothing would
+          # ever stop it spending the next.
+          confirmStamp()
+          {
+            written=$(gh issue view "$existing" --json body --jq .body \
+              | grep -oP 'rebuild-attempts=\K[0-9]+' | tail -1)
+            if [ "${written:-}" != "$1" ] ; then
+              echo "Wrote rebuild-attempts=$1 to issue #${existing}, read back '${written:-nothing}'." >&2
+              exit 1
+            fi
+          }
+
           if [ "$attempts" -lt "$MAX_REBUILD_ATTEMPTS" ] ; then
             next=$((attempts + 1))
             stampAttempts "$next" > "${RUNNER_TEMP}/issue.md"
             gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
+            confirmStamp "$next"
             gh issue comment "$existing" --body \
               "Still finding this. Dispatched another no-cache rebuild (attempt ${next} of ${MAX_REBUILD_ATTEMPTS}); this run waits for it and closes this issue if it clears the finding. [Scan run](${RUN_URL})"
             echo "Issue #${existing}: dispatching rebuild attempt ${next} of ${MAX_REBUILD_ATTEMPTS}."
@@ -331,6 +353,7 @@ jobs:
             next=$((attempts + 1))
             stampAttempts "$next" > "${RUNNER_TEMP}/issue.md"
             gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
+            confirmStamp "$next"
             gh issue comment "$existing" --body \
               "${MAX_REBUILD_ATTEMPTS} automatic rebuilds have not cleared this. Giving up on further attempts -- this needs a manual look: merge the pending base image bump if there is one, or run **ci** from the Actions tab with **Rebuild without the layer cache** ticked. [Scan run](${RUN_URL})"
             echo "Issue #${existing}: ${MAX_REBUILD_ATTEMPTS} attempts made, giving up automatic retries."

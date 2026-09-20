@@ -1004,6 +1004,14 @@ changing any of them.
     `ci.yml`: `no-cache` was already a `workflow_dispatch` input, wired into
     both build steps, waiting for something to set it other than a person in
     the Actions tab.
+    The marker is also read back after it is written, by `confirmStamp`, and
+    a mismatch exits 1 rather than going on. It is the only state this job
+    has and it lives in a field other things write to — #381 acquired an
+    assignee nothing here sets, 87 seconds after this step created it — and
+    losing it is silent by construction: a marker that is gone reads back as
+    attempt 0, so the budget restarts and the cap never engages. A run that
+    cannot record an attempt must not spend one, because nothing would then
+    stop it spending the next either.
     Bumping the marker is `stampAttempts`, and it has to do two different
     things depending on what is already there: `sed` substitute an existing
     `rebuild-attempts=<n>` in place, or append a fresh one when the body has

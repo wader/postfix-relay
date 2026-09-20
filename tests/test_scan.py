@@ -185,3 +185,24 @@ def test_a_no_cache_rebuild_is_verified_by_the_whole_suite():
             f"{job['name']} smoke-tests a no-cache rebuild, which is the one "
             f"image no run of the whole suite ever sees"
         )
+
+
+def test_a_recorded_attempt_is_read_back_before_it_is_spent():
+    """The attempt counter is the only state this job keeps, and it keeps it in
+    an issue body other things write to -- #381 acquired an assignee nothing in
+    the workflow sets, 87 seconds after the workflow created it. A marker that
+    goes missing reads back as attempt 0, so the budget restarts and the cap
+    never engages: the same silent shape as the sed no-op of #379, which cost a
+    day of retries before anyone noticed it was not counting.
+    """
+    issue = scan_steps()["Open or retry the finding issue"]["run"]
+    assert "confirmStamp" in issue, (
+        "the marker is written and never read back, so losing it is silent"
+    )
+    assert issue.count("confirmStamp \"$next\"") == 2, (
+        "both branches that bump the counter must confirm it landed"
+    )
+    after = issue.split("confirmStamp()", 1)[1]
+    assert "exit 1" in after, (
+        "a run that cannot record an attempt must not go on to spend one"
+    )
