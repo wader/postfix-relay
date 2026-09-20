@@ -1096,11 +1096,19 @@ changing any of them.
     *cancelled* rather than failed, and github's notification for a scheduled
     workflow fires on failure: the one way out of here that would turn the
     alarm off instead of leaving it red.
-    One thing it did not settle, and worth knowing: the attempt is spent by
-    the step above before this one learns whether the rebuild ran at all, so a
-    build cancelled by `ci.yml`'s concurrency group still costs a day of
-    budget. Invariant 36's three attempts are the slack for exactly that, so
-    it is covered rather than free.
+    The attempt is spent by the step above before this one learns anything, so
+    a rebuild that never ran used to cost a day of budget anyway. It is given
+    back now, and only where the rebuild demonstrably never built: `cancelled`
+    — `ci.yml`'s concurrency group puts a dispatch on `master` in the same
+    group as the push run for that commit and cancels it when a third arrives
+    — and the case where no run ever appeared. A rebuild that *failed* is not
+    refunded, because that is the runner hiccup the three attempts are sized
+    for; nor are `timeout` and `unreadable`, where the run may be building this
+    minute and only this job stopped looking. The counter is restored to the
+    value the issue step read rather than decremented from whatever is found,
+    since the body is editable by other things, and the refund comments once:
+    the step above has already said an attempt was dispatched, and walking that
+    back in silence leaves the issue claiming a count it no longer has.
     Per *finding* is the counter's whole claim, and for a while it was not
     true of the code, which matched the issue on its title alone and held one
     open until the scan was clean about everything. A vulnerability arriving

@@ -247,6 +247,7 @@ jobs:
             } > "${RUNNER_TEMP}/issue.md"
             gh issue create --title "${ISSUE_TITLE}" --body-file "${RUNNER_TEMP}/issue.md"
             echo "dispatch=true" >> "${GITHUB_OUTPUT}"
+            echo "restore=0" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -341,6 +342,11 @@ jobs:
             stampAttempts "$next" > "${RUNNER_TEMP}/issue.md"
             gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
             confirmStamp "$next"
+            # What to put back if the rebuild the next step dispatches turns
+            # out never to have run. The value rather than a subtraction: the
+            # body is editable by things other than this job, so restoring what
+            # was read is honest where decrementing what is found is a guess.
+            echo "restore=${attempts}" >> "${GITHUB_OUTPUT}"
             gh issue comment "$existing" --body \
               "Still finding this. Dispatched another no-cache rebuild (attempt ${next} of ${MAX_REBUILD_ATTEMPTS}); this run waits for it and closes this issue if it clears the finding. [Scan run](${RUN_URL})"
             echo "Issue #${existing}: dispatching rebuild attempt ${next} of ${MAX_REBUILD_ATTEMPTS}."
@@ -450,6 +456,7 @@ jobs:
           if [ -z "$run" ] ; then
             echo "Dispatched, but no new ci run appeared within two minutes."
             echo "conclusion=missing" >> "${GITHUB_OUTPUT}"
+            echo "refund=yes" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           echo "run_id=${run}" >> "${GITHUB_OUTPUT}"
@@ -510,6 +517,53 @@ jobs:
           fi
           echo "ci run ${run} finished: ${conclusion}"
           echo "conclusion=${conclusion}" >> "${GITHUB_OUTPUT}"
+          # An attempt is a rebuild that got its chance and did not clear the
+          # finding. A run cancelled before it built never got one -- ci.yml's
+          # concurrency group holds a dispatch on master behind the push run
+          # for the same commit and cancels it when a third arrives -- and
+          # neither did one that never appeared. Those are given back. A run
+          # that *failed* is not: that is the runner hiccup invariant 36 sizes
+          # the three attempts for, and it is the case the slack exists to
+          # absorb. Nor are "timeout" and "unreadable", where the run may well
+          # be building this minute and only this job stopped looking.
+          if [ "${conclusion}" = "cancelled" ] ; then
+            echo "refund=yes" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Give back an attempt the rebuild never used
+        # Ordered before the re-scan because there is nothing to re-scan on
+        # this path: the tag cannot have moved for a build that never ran.
+        #
+        # A word rather than a number in the condition, for the reason the
+        # re-scan step sets one out: an output of a step that did not run is
+        # Null, and Null compares equal to "0" and to "".
+        id: refund
+        if: steps.rebuild.outputs.refund == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RESTORE: "${{ steps.issue.outputs.restore }}"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -eu
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number] | first // empty')
+          if [ -z "$existing" ] ; then
+            echo "Nothing open to give the attempt back to."
+            exit 0
+          fi
+          body=$(gh issue view "$existing" --json body --jq .body)
+          printf '%s' "$body" \
+            | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=${RESTORE}/" \
+            > "${RUNNER_TEMP}/issue.md"
+          gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
+          # The step above has already said in a comment that it dispatched an
+          # attempt, so this one says that it did not stand -- a counter walked
+          # back in silence is worse than the comment it costs, and this is
+          # rare by construction rather than daily.
+          gh issue comment "$existing" --body \
+            "That rebuild never ran -- it was cancelled or never started -- so the attempt is not counted and tomorrow's scan tries again from where this one found it. [Scan run](${RUN_URL})"
+          echo "Issue #${existing}: attempt given back, counter restored to ${RESTORE}."
 
       - name: Re-scan what the rebuild published
         # The question the run that applied a remedy is in the best position to

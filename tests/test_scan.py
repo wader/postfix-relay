@@ -181,3 +181,34 @@ def test_a_recorded_attempt_is_read_back_before_it_is_spent():
     assert "exit 1" in after, (
         "a run that cannot record an attempt must not go on to spend one"
     )
+
+
+def test_an_attempt_the_rebuild_never_used_is_given_back():
+    """An attempt is a rebuild that got its chance and did not clear the
+    finding. `ci.yml`'s concurrency group puts a dispatch on `master` in the
+    same group as the push run for that commit and cancels it when a third
+    arrives, so a rebuild can be cancelled before it builds anything -- and one
+    that never appeared never built either. Neither is what the three attempts
+    are slack for, which is a rebuild that ran and failed.
+    """
+    steps = scan_steps()
+    rebuild = steps["Trigger a no-cache rebuild and wait for it"]["run"]
+    assert rebuild.count("refund=yes") == 2, (
+        "exactly the two ways out where the rebuild never ran -- cancelled, "
+        "and never appeared -- give the attempt back"
+    )
+    for kept in ("timeout", "unreadable"):
+        assert f'conclusion={kept}" >> "${{GITHUB_OUTPUT}}"\n' in rebuild + "\n", (
+            f"'{kept}' must stay a spent attempt: the run may still be building"
+        )
+
+    refund = steps["Give back an attempt the rebuild never used"]
+    assert refund["if"] == "steps.rebuild.outputs.refund == 'yes'"
+    assert refund["env"]["RESTORE"] == "${{ steps.issue.outputs.restore }}", (
+        "restoring the value read beats decrementing the value found, in a "
+        "body other things edit"
+    )
+    assert "gh issue comment" in refund["run"], (
+        "the step above already said an attempt was dispatched; walking that "
+        "back in silence leaves the issue claiming a count it no longer has"
+    )
