@@ -99,3 +99,28 @@ def test_every_step_that_reaches_github_says_which_repository():
         if "gh " in step.get("run", "") and "GH_REPO" not in step.get("env", {})
     ]
     assert not missing, f"steps calling gh without GH_REPO set: {missing}"
+
+
+def test_the_attempt_budget_is_per_finding_and_not_per_issue():
+    """The issue is matched on its title alone and held open until the scan is
+    clean about everything, so a vulnerability arriving while it is open would
+    otherwise inherit the budget the previous one had already spent -- and a
+    brand-new one turning up on day three would reach the give-up branch with
+    no rebuild ever attempted for it. The ids the attempts were spent on are
+    what tell those apart.
+    """
+    steps = scan_steps()
+    assert "ids=" in steps["Scan the published image"]["run"]
+    assert "VulnerabilityID" in steps["Scan the published image"]["run"]
+
+    issue = steps["Open or retry the finding issue"]
+    assert issue["env"]["IDS"] == "${{ steps.scan.outputs.ids }}"
+    assert "seen=" in issue["run"], (
+        "the marker records only a count, so nothing says which finding the "
+        "attempts were spent on and a new one inherits a spent budget"
+    )
+    assert "attempts=0" in issue["run"], (
+        "nothing restarts the budget, so an id never retried for still lands "
+        "in the give-up branch"
+    )
+
