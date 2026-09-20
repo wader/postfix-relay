@@ -124,3 +124,28 @@ def test_the_attempt_budget_is_per_finding_and_not_per_issue():
         "in the give-up branch"
     )
 
+
+def test_a_no_cache_rebuild_is_verified_by_the_whole_suite():
+    """A rebuild is a workflow_dispatch of ci.yml, and test.yml is started by a
+    push to master, a pull request or a dispatch of its own -- never by that.
+    So on a rebuild these two jobs are the only thing that looks at the image
+    before `Publish latest` moves the tag onto it, and the package set they
+    would be smoke-testing is the one thing about it the suite has never seen.
+    """
+    ci = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    verify = [job for key, job in ci["jobs"].items() if key.startswith("verify_published")]
+    assert len(verify) == 2, f"expected two verify jobs, got {len(verify)}"
+    for job in verify:
+        named = [s for s in job["steps"] if s["name"].startswith("Run the tests")]
+        assert named, (
+            f"{job['name']} has no step named 'Run the tests...'; steps are "
+            f"{[s['name'] for s in job['steps']]}"
+        )
+        step = named[0]
+        assert step["env"]["NO_CACHE"] == "${{ inputs.no-cache || false }}"
+        assert "pytest -m smoke" in step["run"], "a merge must still only smoke-test"
+        body = step["run"].replace("pytest -m smoke", "")
+        assert "pytest" in body, (
+            f"{job['name']} smoke-tests a no-cache rebuild, which is the one "
+            f"image no run of the whole suite ever sees"
+        )

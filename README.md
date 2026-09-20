@@ -649,7 +649,12 @@ and when it finds a vulnerability Debian has already shipped a fix for, it
 opens an issue and rebuilds the image itself, re-resolving the packages
 against the archive without waiting for the next base tag. It then waits for
 that rebuild, scans what it published and closes the issue itself when the
-finding is gone, so the usual life of one is minutes rather than a day. If
+finding is gone, so the usual life of one is minutes rather than a day.
+Because such a rebuild changes the packages under a tree nobody edited, what
+it publishes is held to the whole test suite on both native architectures --
+not the four smoke tests a merge runs against the published image, since a
+merge has the suite run against that same tree elsewhere -- before `latest` is
+moved onto it. If
 the rebuild does not clear it, the same job retries automatically for a few
 more days before giving up and leaving the issue for a person to look at — it
 stays open either way until a rebuild actually clears the finding. If it is

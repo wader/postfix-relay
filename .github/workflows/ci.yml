@@ -300,15 +300,30 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r tests/requirements.txt
 
-      - name: Run the smoke tests
-        # Not the whole suite: test.yml already runs that against the image
-        # built from this same commit on both of these architectures, so what
-        # is left to learn is whether the artefact that was published starts
-        # and relays. That is what the smoke tests say (see pytest.ini).
+      - name: Run the tests against what was published
+        # The smoke tests on a merge: test.yml already runs the whole suite
+        # against an image built from this same commit on both of these
+        # architectures, so what is left to learn is whether the artefact that
+        # was published starts and relays. That is what the smoke tests say
+        # (see pytest.ini).
         #
-        # No junit here. The reporter in test-results.yml follows the "test"
-        # workflow, and this job's own verdict is the signal.
-        timeout-minutes: 10
+        # The whole suite when this run is a no-cache rebuild, because that
+        # premise is exactly what does not hold there. Such a run is a
+        # workflow_dispatch of *this* workflow, and test.yml is started by a
+        # push to master, by a pull request and by a dispatch of its own --
+        # none of which that is. So on a rebuild the suite runs nowhere, and
+        # these two jobs' four smoke tests per architecture are the only thing
+        # that ever looks at the image before "Publish latest" moves the tag
+        # onto it. That is the wrong way round: a rebuild is dispatched
+        # precisely because the archive moved under a tree nobody touched, so
+        # its package set is the one thing about the image that the suite has
+        # never seen, while a merge changes the tree the suite is built to
+        # test. Minutes instead of seconds, on a job that runs only when the
+        # scan or a person asked for a rebuild. (issue #381)
+        #
+        # No junit either way. The reporter in test-results.yml follows the
+        # "test" workflow, and this job's own verdict is the signal.
+        timeout-minutes: 15
         env:
           POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
           # This image is the runner's own architecture, which the fixture
@@ -316,7 +331,14 @@ jobs:
           POSTFIX_RELAY_IMAGE_PUBLISHED: "1"
           # And it still has to be the architecture this job meant to pull.
           POSTFIX_RELAY_ARCH: "amd64"
-        run: pytest -m smoke
+          NO_CACHE: "${{ inputs.no-cache || false }}"
+        run: |
+          set -eu
+          if [ "${NO_CACHE}" = "true" ] ; then
+            pytest
+          else
+            pytest -m smoke
+          fi
 
   verify_published_arm64:
     name: "Verify Published Image (arm64)"
@@ -359,13 +381,21 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r tests/requirements.txt
 
-      - name: Run the smoke tests
-        timeout-minutes: 10
+      - name: Run the tests against what was published
+        # The same two sets for the same two reasons as the job above.
+        timeout-minutes: 15
         env:
           POSTFIX_RELAY_IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}@${{ needs.docker.outputs.digest }}"
           POSTFIX_RELAY_IMAGE_PUBLISHED: "1"
           POSTFIX_RELAY_ARCH: "arm64"
-        run: pytest -m smoke
+          NO_CACHE: "${{ inputs.no-cache || false }}"
+        run: |
+          set -eu
+          if [ "${NO_CACHE}" = "true" ] ; then
+            pytest
+          else
+            pytest -m smoke
+          fi
 
   promote:
     name: "Publish latest"
