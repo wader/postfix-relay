@@ -159,6 +159,11 @@ jobs:
           # looked at a different image or at the same one twice.
           digest=$(jq -r '.Metadata.RepoDigests[0] // empty' "${RUNNER_TEMP}/trivy.json")
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          # And which findings they are, for the step below to tell a finding
+          # it has already spent rebuilds on from one it has not.
+          ids=$(jq -r '[.Results[]?.Vulnerabilities[]?.VulnerabilityID] | unique | join(",")' \
+            "${RUNNER_TEMP}/trivy.json")
+          echo "ids=${ids}" >> "${GITHUB_OUTPUT}"
           echo "${count} finding(s) with a fix available in ${digest:-${IMAGE}}"
           trivy convert --format table "${RUNNER_TEMP}/trivy.json" \
             | tee "${RUNNER_TEMP}/trivy.txt"
@@ -187,6 +192,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          IDS: "${{ steps.scan.outputs.ids }}"
         run: |
           set -eu
           # Matched on the title rather than through the search index, which
@@ -220,7 +226,7 @@ jobs:
               head -c 50000 "${RUNNER_TEMP}/trivy.txt"
               echo '```'
               echo
-              echo "<!-- rebuild-attempts=1 -->"
+              echo "<!-- rebuild-attempts=1 seen=${IDS} -->"
             } > "${RUNNER_TEMP}/issue.md"
             gh issue create --title "${ISSUE_TITLE}" --body-file "${RUNNER_TEMP}/issue.md"
             echo "dispatch=true" >> "${GITHUB_OUTPUT}"
@@ -236,6 +242,43 @@ jobs:
           body=$(gh issue view "$existing" --json body --jq .body)
           attempts=$(printf '%s' "$body" | grep -oP 'rebuild-attempts=\K[0-9]+' | tail -1)
           attempts=${attempts:-0}
+          seen=$(printf '%s' "$body" | grep -oP 'rebuild-attempts=[0-9]+ seen=\K[^ ]+' | tail -1)
+          seen=${seen:-}
+
+          # The count is about how many rebuilds failed to clear a particular
+          # finding, and this issue is matched on its title alone -- there is
+          # one of it, held open until the scan is clean about *everything*.
+          # So a vulnerability that turns up while the issue is open used to
+          # inherit whatever budget the previous one had already spent, and a
+          # brand-new one arriving on day three reached the give-up branch
+          # having never had a single rebuild attempted for it. Recording the
+          # ids the attempts were spent on is what tells those apart: an id
+          # this issue has not been retried for before restarts the budget,
+          # which is what invariant 36 says the counter does and what it did
+          # not do. Ids only accumulate, so a finding that is fixed and comes
+          # back does not hand out a second budget, and the cron still paces
+          # the whole thing at one rebuild a day however many arrive.
+          #
+          # An older marker carries no ids at all, which reads as every
+          # current finding being unseen and restarts the budget once. That
+          # is the honest answer rather than a migration bug: what those
+          # attempts were spent on is not recorded anywhere, so the only
+          # thing that can be said about today's findings is that nothing
+          # says they were covered. It costs one extra attempt, once, on an
+          # issue that is already open.
+          fresh=""
+          for id in $(printf '%s' "${IDS}" | tr ',' ' ') ; do
+            case ",${seen}," in
+              *",${id},"*) ;;
+              *) fresh="$id" ; break ;;
+            esac
+          done
+          if [ -n "$fresh" ] ; then
+            echo "Issue #${existing}: ${fresh} is not one of the findings earlier attempts were spent on; restarting the budget."
+            attempts=0
+          fi
+          seen=$(printf '%s,%s' "${seen}" "${IDS}" | tr ',' '\n' \
+            | grep -v '^$' | sort -u | paste -sd,)
 
           # sed only edits a marker that is there to find: on a body with none
           # -- the same pre-existing-issue case the read above defaults for --
@@ -243,11 +286,15 @@ jobs:
           # issue this shipped against retrying attempt 1 forever, never
           # actually written down. Appending one is the other half that read
           # already assumed.
+          # The whole marker is rewritten rather than just the number, since
+          # the ids travel with it -- and "[^>]*" is what carries an older
+          # marker that has only the number across to the new shape.
           stampAttempts() {
             if printf '%s' "$body" | grep -qP 'rebuild-attempts=[0-9]+' ; then
-              printf '%s' "$body" | sed -E "s/rebuild-attempts=[0-9]+/rebuild-attempts=$1/"
+              printf '%s' "$body" \
+                | sed -E "s|<!-- rebuild-attempts=[0-9]+[^>]*-->|<!-- rebuild-attempts=$1 seen=${seen} -->|"
             else
-              printf '%s\n\n<!-- rebuild-attempts=%s -->\n' "$body" "$1"
+              printf '%s\n\n<!-- rebuild-attempts=%s seen=%s -->\n' "$body" "$1" "${seen}"
             fi
           }
 

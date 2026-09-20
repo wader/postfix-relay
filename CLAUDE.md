@@ -980,7 +980,11 @@ changing any of them.
     -f no-cache=true` under the `actions: write` permission added alongside
     `issues: write` for exactly this. Three by default: enough for a rebuild
     that failed for an unrelated reason — a runner hiccup, a registry blip —
-    to get two more days to clear on its own before anyone has to look.
+    to get two more days to clear on its own before anyone has to look. The
+    attempts land at roughly 0h, 24h and 48h, but the give-up comment arrives
+    at about 72h, because the run that reaches the cap is the one that posts
+    it; and "days" carries about an hour and a half of slack each way, the
+    measured gap between scheduled runs being 22h45m to 25h37m rather than 24h.
     The count `steps.scan.outputs.count` carries is no use for pacing this: it
     stays non-zero on every scan the issue remains open for, including the
     ones that already gave up, so gating the dispatch on it would be the
@@ -1042,6 +1046,22 @@ changing any of them.
     nobody to fetch — a red nobody acts on is the "teach everyone to filter
     it" failure this invariant already avoids for comments, spent on attention
     instead. The record is the issue, opened and closed.
+    Per *finding* is the counter's whole claim, and for a while it was not
+    true of the code, which matched the issue on its title alone and held one
+    open until the scan was clean about everything. A vulnerability arriving
+    while the issue was open therefore inherited whatever budget the previous
+    one had already spent, and one arriving on day three reached the give-up
+    branch having had no rebuild attempted for it at all — the exact state
+    this invariant exists to prevent, reached faster than by any of the routes
+    it does describe. The marker now carries the ids as well as the count
+    (`<!-- rebuild-attempts=<n> seen=<CVE,CVE,…> -->`), and an id the issue has
+    not been retried for before restarts the budget. Ids only accumulate, so a
+    finding that is fixed and returns is not handed a second budget, and the
+    cron still paces the whole thing at one rebuild a day however many
+    findings arrive. A marker written before this carries no ids, which reads
+    as every current finding being unseen and restarts the budget once: what
+    those attempts were spent on is recorded nowhere, so the only thing that
+    can be said about today's findings is that nothing says they were covered.
     A step and not a second trigger, which is the obvious fix and is the
     wrong one. The pacing this invariant rests on is a property of the
     *trigger list*, not of the cap: nothing in the step compares timestamps
