@@ -212,3 +212,29 @@ def test_an_attempt_the_rebuild_never_used_is_given_back():
         "the step above already said an attempt was dispatched; walking that "
         "back in silence leaves the issue claiming a count it no longer has"
     )
+
+
+def test_the_scan_job_allows_the_longest_run_in_the_tree():
+    """It is the only job that spends most of its time waiting for another
+    workflow, so CLAUDE.md says its `timeout-minutes` is the longest there is.
+    That is the kind of claim a later job quietly overtakes, and the number
+    underneath it is load-bearing: the wait has a bound of its own that has to
+    stay well inside this one, because a job killed by `timeout-minutes` is
+    *cancelled* rather than failed and github's notification for a scheduled
+    run fires on failure.
+    """
+    workflows = sorted((SCAN.parent).glob("*.yml"))
+    timeouts = {}
+    for path in workflows:
+        for key, job in yaml.safe_load(path.read_text())["jobs"].items():
+            timeouts[f"{path.name}:{job.get('name', key)}"] = job.get("timeout-minutes")
+
+    missing = [name for name, value in timeouts.items() if value is None]
+    assert not missing, f"jobs with no timeout-minutes, which default to six hours: {missing}"
+
+    scan = timeouts["scan.yml:Image Scan"]
+    longer = {n: v for n, v in timeouts.items() if v >= scan and n != "scan.yml:Image Scan"}
+    assert not longer, (
+        f"CLAUDE.md says the scan job's timeout is the longest in the tree; "
+        f"these reach or pass it: {longer}"
+    )
