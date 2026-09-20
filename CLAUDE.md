@@ -1043,10 +1043,10 @@ changing any of them.
     issue stayed open and the run stayed red for the twenty-four hours until
     the next scheduled scan, over an image that was already clean. So the step
     now polls for the run it started — `gh workflow run` returns no id and the
-    API offers no handle, so it takes the newest `workflow_dispatch` ci run id
-    on `master` as a floor before dispatching and claims the oldest one above
-    it — waits for that run on a bound of its own well inside the job's, and
-    hands the next step a conclusion. Every way out other than `success`
+    API offers no handle, so it takes two floors before dispatching, the newest
+    `workflow_dispatch` ci run id on `master` and a timestamp, and claims the
+    oldest run above both — waits for that run on a bound of its own well
+    inside the job's, and hands the next step a conclusion. Every way out other than `success`
     leaves the re-scan unrun and the run red, which is exactly what this job
     did before.
     What the re-scan then compares is digests, not only counts. **Publish
@@ -1078,12 +1078,13 @@ changing any of them.
     accident and not by design (`== 'true'`, `== 'success'`), which is why
     `tests/test_scan.py` now fails on any condition comparing a skippable
     step's output against a numeric literal rather than on these two by name.
-    Two smaller things the same review settled. The run the wait attaches to
-    is found by *two* floors, an id and a timestamp: an id floor alone reads 0
-    when the listing comes back empty, and the `min` then claims the oldest
-    run in the window — one that finished days ago, over the image just
-    scanned, with conclusion `success`. And the wait's bound has to stay well
-    inside the job's `timeout-minutes`, because a job killed by that is
+    Two smaller things the same review settled. The timestamp floor above is
+    one of them, and it is there because an id floor alone reads 0 when the
+    listing comes back empty — no prior dispatch on a fresh fork, or one
+    transient API failure — and the `min` then claims the oldest run in the
+    window rather than the newest: one that finished days ago, over the image
+    just scanned, with conclusion `success`. And the wait's bound has to stay
+    well inside the job's `timeout-minutes`, because a job killed by that is
     *cancelled* rather than failed, and github's notification for a scheduled
     workflow fires on failure: the one way out of here that would turn the
     alarm off instead of leaving it red.
