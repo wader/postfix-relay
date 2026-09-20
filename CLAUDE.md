@@ -36,7 +36,7 @@ why merge commits name someone else's namespace.
 | `.claude/hooks/session-start.sh` | Starts the docker daemon and installs `tests/requirements.txt`, because a Claude Code on the web container has neither and both gates need them. Guarded on `CLAUDE_CODE_REMOTE=true`, so a local checkout is untouched, and best-effort: a failed step explains itself on stderr and the hook still exits 0, so check stderr before believing a build or test failure. |
 | `tests/__init__.py` | Empty; makes `tests` a package, which is what lets `conftest.py` name plugins as `tests.fixtures.*` and lets modules do `from tests.helpers import …`. pytest therefore has to be run from the repo root. There is no `tests/fixtures/__init__.py`. |
 | `tests/conftest.py` | Registers the four fixture modules as pytest plugins, and defines the failure plumbing: `print_log_on_failure`, an autouse `shared_container_logs` fixture, and a `pytest_runtest_makereport` wrapper hook that stashes the report on the item. |
-| `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py` and `test_ruleset.py`, and by three of the four fixture modules. `file_missing` is the one that cannot be spelled with `container_exec`, which fails on a non-zero exit: asking whether a path is absent needs the exit code, not the output. |
+| `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py`, `test_ruleset.py` and `test_ci.py`, and by three of the four fixture modules. `file_missing` is the one that cannot be spelled with `container_exec`, which fails on a non-zero exit: asking whether a path is absent needs the exit code, not the output. |
 | `tests/requirements.txt` | Seven pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `pyyaml`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not; `pyyaml` is there for `test_ruleset.py` alone. |
 | `tests/fixtures/shared_network.py` | Session-scoped `shared_network`: a testcontainers `Network()` with a generated, labelled name — not a fixed one, so an interrupted run leaves nothing for the next one to collide with. |
 | `tests/fixtures/postfix.py` | Seven fixtures: `postfix_image`, `upgrade_from_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH` / `POSTFIX_RELAY_IMAGE_PUBLISHED`, and the released image out of `tests/upgrade-from.Dockerfile`. |
@@ -44,9 +44,9 @@ why merge commits name someone else's namespace.
 | `tests/upgrade-from.Dockerfile` | The other unbuilt anchor: one `FROM mwader/postfix-relay:<version>` line, read back by `tests/fixtures/postfix.py`, naming the released image `tests/test_upgrade.py` starts before the one built from the tree. A release and not `latest` — see invariant 33. |
 | `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, whose image is read from `tests/mailpit.Dockerfile` rather than written here: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
-| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
+| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `ci`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
-| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's — never `latest`, and on a tag ref nothing at all: a release builds nothing and instead points the version tags at the `sha-<commit>` image `master` already published and verified. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it; the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create` — after checking the commit is still `master`'s head, since master runs are not cancelled and two of them would otherwise race to write the tag. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
+| `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's — never `latest`, and on a tag ref nothing at all: a release builds nothing and instead points the version tags at the `sha-<commit>` image `master` already published and verified. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it — or the *whole* suite when the run is a `no-cache` rebuild, which `test.yml` never sees (invariant 36); the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create` — after checking the commit is still `master`'s head, since master runs are not cancelled and two of them would otherwise race to write the tag. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F,B tests` — pyflakes and bugbear over all the python in the tree. The only two linters there are, and neither reads a config file. |
@@ -79,8 +79,9 @@ pytest.ini ──addopts──> pytest-xdist   (-n auto --dist loadfile --maxpro
 
 tests/test_*.py
     │
-    ├──> tests/helpers.py         (every module but test_sendmail.py and
-    │                              test_ruleset.py, which starts no container)
+    ├──> tests/helpers.py         (every module but test_sendmail.py, and
+    │                              test_ruleset.py and test_ci.py, which
+    │                              start no container)
     │        └── once_across_workers  -> builds/pulls the image once per RUN,
     │                                     not once per xdist worker
     └──> fixtures, registered in tests/conftest.py as pytest_plugins:
@@ -169,8 +170,9 @@ it only ever builds the host's — follow the cross-build recipe in
 [README.md](README.md#testing). It pins the same binfmt image CI does, so a
 failure there means the same thing.
 
-One module runs without a docker daemon: `test_ruleset.py`, which reads
-`.github/rulesets/master.json` and the workflows and starts nothing. Everything
+Two modules run without a docker daemon: `test_ruleset.py`, which reads
+`.github/rulesets/master.json` and the workflows, and `test_ci.py`, which reads
+`.github/workflows/ci.yml`. Both start nothing. Everything
 else needs one. Most tests start a real relay; the exception is
 `test_image.py`, which starts none — it
 reads `docker inspect` output through `image_config`, asks a throwaway `sleep`
@@ -945,6 +947,19 @@ changing any of them.
     It is expected to be green — it was when it was written, `trivy` and
     `grype` both reporting zero fixable findings and `apt-get -s full-upgrade`
     inside the published image agreeing.
+    What a `no-cache` rebuild publishes is held to the whole suite rather
+    than to the four smoke tests a merge is. Such a rebuild is a
+    `workflow_dispatch` of `ci.yml`, and `test.yml` is started by a push to
+    `master`, by a pull request or by a dispatch of its own — never by that
+    one — so the suite ran nowhere for a rebuild, and **Verify Published
+    Image**'s four smoke tests per architecture were the only thing that
+    looked at the image before **Publish latest** moved the tag onto it. That
+    is the wrong way round: a rebuild is dispatched precisely because the
+    archive moved under a tree nobody touched, so its package set is the one
+    thing about the image the suite has never seen, where a merge changes the
+    tree the suite is built to test. Both jobs now branch on
+    `inputs.no-cache`, which is minutes instead of seconds on a job that runs
+    only when the scan or a person asked for a rebuild.
     The `no-cache` dispatch input on `ci.yml` is the other half and does not
     stand alone: the apt install is unversioned, so a build resolves current
     archive versions for every package the image carries -- see invariant 37
