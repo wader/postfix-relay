@@ -36,7 +36,7 @@ why merge commits name someone else's namespace.
 | `.claude/hooks/session-start.sh` | Starts the docker daemon and installs `tests/requirements.txt`, because a Claude Code on the web container has neither and both gates need them. Guarded on `CLAUDE_CODE_REMOTE=true`, so a local checkout is untouched, and best-effort: a failed step explains itself on stderr and the hook still exits 0, so check stderr before believing a build or test failure. |
 | `tests/__init__.py` | Empty; makes `tests` a package, which is what lets `conftest.py` name plugins as `tests.fixtures.*` and lets modules do `from tests.helpers import …`. pytest therefore has to be run from the repo root. There is no `tests/fixtures/__init__.py`. |
 | `tests/conftest.py` | Registers the four fixture modules as pytest plugins, and defines the failure plumbing: `print_log_on_failure`, an autouse `shared_container_logs` fixture, and a `pytest_runtest_makereport` wrapper hook that stashes the report on the item. |
-| `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py`, `test_ruleset.py` and `test_ci.py`, and by three of the four fixture modules. `file_missing` is the one that cannot be spelled with `container_exec`, which fails on a non-zero exit: asking whether a path is absent needs the exit code, not the output. |
+| `tests/helpers.py` | The shared vocabulary — `poll_until`, `once_across_workers`, `wait_for_smtp`, `send`, `container_exec`, `postconf`, `listening_ports`, `exit_code_within` and the rest. Imported by every test module but `test_sendmail.py`, `test_ruleset.py`, `test_ci.py` and `test_scan.py`, and by three of the four fixture modules. `file_missing` is the one that cannot be spelled with `container_exec`, which fails on a non-zero exit: asking whether a path is absent needs the exit code, not the output. |
 | `tests/requirements.txt` | Seven pinned packages: `dkimpy`, `docker`, `pytest`, `pytest-xdist`, `pyyaml`, `requests`, `testcontainers[mailpit]`. `dkimpy` is what satisfies `import dkim`, so grepping module names against this file looks like a miss when it is not; `pyyaml` is there for `test_ruleset.py` alone. |
 | `tests/fixtures/shared_network.py` | Session-scoped `shared_network`: a testcontainers `Network()` with a generated, labelled name — not a fixed one, so an interrupted run leaves nothing for the next one to collide with. |
 | `tests/fixtures/postfix.py` | Seven fixtures: `postfix_image`, `upgrade_from_image`, `postfix` and `_relay_pool` (session, the last being the per-configuration relay pool); `postfix_factory`, `postfix_shared` and `docker_volume` (function). Every relay gets `POSTFIX_relayhost=mailpit:1025`, set before the caller's env so a test can override it; readiness is an SMTP connection, not a log line. Reads `POSTFIX_RELAY_IMAGE` / `POSTFIX_RELAY_ARCH` / `POSTFIX_RELAY_IMAGE_PUBLISHED`, and the released image out of `tests/upgrade-from.Dockerfile`. |
@@ -44,13 +44,13 @@ why merge commits name someone else's namespace.
 | `tests/upgrade-from.Dockerfile` | The other unbuilt anchor: one `FROM mwader/postfix-relay:<version>` line, read back by `tests/fixtures/postfix.py`, naming the released image `tests/test_upgrade.py` starts before the one built from the tree. A release and not `latest` — see invariant 33. |
 | `tests/fixtures/mailpit.py` | The remote-SMTP stand-in, whose image is read from `tests/mailpit.Dockerfile` rather than written here: a `Mailpit` REST client class plus `mailpit_image` and `mailpit_container` (session), `mailpit` and `mailpit_factory` (function). Also rebinds the library's `wait_for_logs` to a `functools.partial` with a shorter poll interval. |
 | `tests/fixtures/smtp.py` | `smtplib` client against the shared `postfix` relay's mapped port 25. Function-scoped on purpose: the tests about rejected mail leave the connection broken. |
-| `tests/test_*.py` | `capabilities`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `ci`, `postmaster`, `qshape`, `ruleset`, `sasl`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
+| `tests/test_*.py` | `capabilities`, `ci`, `client_tls`, `config`, `defaults`, `dkim`, `healthcheck`, `image`, `lifecycle`, `logging`, `postmaster`, `qshape`, `ruleset`, `sasl`, `scan`, `secrets`, `sendmail`, `smtp`, `srs`, `upgrade`. Each has a row in the README's per-file table. |
 | `tests/img/postfix-logo.png` | The inline image `tests/test_sendmail.py` attaches, and compares byte for byte on the way out. |
 | `.github/workflows/ci.yml` | `name: ci`. Four jobs. `docker`, displayed as **Build Image**: buildx over `linux/amd64,linux/arm/v7,linux/arm64/v8`, GHA build cache, nothing pushed on a pull request, and the tags it pushes are docker_meta's — never `latest`, and on a tag ref nothing at all: a release builds nothing and instead points the version tags at the `sha-<commit>` image `master` already published and verified. `verify_published_amd64` and `verify_published_arm64`, displayed as **Verify Published Image (amd64)** and **(arm64)**: `needs: docker`, `master` only, each pulls by digest the image that was just pushed and runs `pytest -m smoke` against it — or the *whole* suite when the run is a `no-cache` rebuild, which `test.yml` never sees (invariant 36); the amd64 one first asserts the published manifest lists the three platforms the build asks for. `promote`, displayed as **Publish latest**: `master` only, `needs` all three, and points `latest` at that digest with `imagetools create` — after checking the commit is still `master`'s head, since master runs are not cancelled and two of them would otherwise race to write the tag. Spelled out rather than a matrix, for the reason test.yml gives — the job name is what a required status check and the auto-merge workflow match on — and for one of its own: a matrix expands `${{ matrix.arch }}` only in the runs it starts, so a pull request, where the `if` skips the job whole, reported the raw expression as the check's name. The workflow also takes a `workflow_dispatch` with one boolean input, `no-cache`, wired into both build steps — the remediation lever for an **Image Scan** finding, and the three jobs above verify and tag what it republishes. |
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F,B tests` — pyflakes and bugbear over all the python in the tree. The only two linters there are, and neither reads a config file. |
-| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker; each of the first `MAX_REBUILD_ATTEMPTS` runs that finds the issue still open also dispatches **ci.yml** on `master` with `no-cache` set, so the rebuild the issue names is already running before anyone reads it — see invariant 36. |
+| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker; each of the first `MAX_REBUILD_ATTEMPTS` runs that finds the issue still open also dispatches **ci.yml** on `master` with `no-cache` set, *waits for that run* and re-scans what it published, so the run that applied the remedy is the one that closes the issue rather than the next morning's — see invariant 36. The waiting is why its `timeout-minutes` is an hour where no other job's reaches half of one, and why the wait has a bound of its own well inside it. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `SECURITY.md` | Where to report a vulnerability, and — the half that is actually load-bearing — what is *not* one here: the open relay default (invariant 23), no client TLS, starting as root, and a scanner row with no fixed version. Without that, a policy invites reports about behaviour the README documents as deliberate. Names no address: it points at github's private vulnerability reporting, which needs a repository setting rather than a file. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
@@ -80,8 +80,8 @@ pytest.ini ──addopts──> pytest-xdist   (-n auto --dist loadfile --maxpro
 tests/test_*.py
     │
     ├──> tests/helpers.py         (every module but test_sendmail.py, and
-    │                              test_ruleset.py and test_ci.py, which
-    │                              start no container)
+    │                              test_ruleset.py, test_ci.py and
+    │                              test_scan.py, which start no container)
     │        └── once_across_workers  -> builds/pulls the image once per RUN,
     │                                     not once per xdist worker
     └──> fixtures, registered in tests/conftest.py as pytest_plugins:
@@ -170,9 +170,10 @@ it only ever builds the host's — follow the cross-build recipe in
 [README.md](README.md#testing). It pins the same binfmt image CI does, so a
 failure there means the same thing.
 
-Two modules run without a docker daemon: `test_ruleset.py`, which reads
-`.github/rulesets/master.json` and the workflows, and `test_ci.py`, which reads
-`.github/workflows/ci.yml`. Both start nothing. Everything
+Three modules run without a docker daemon: `test_ruleset.py`, which reads
+`.github/rulesets/master.json` and the workflows, `test_ci.py`, which reads
+`.github/workflows/ci.yml`, and `test_scan.py`, which reads
+`.github/workflows/scan.yml`. None of them starts anything. Everything
 else needs one. Most tests start a real relay; the exception is
 `test_image.py`, which starts none — it
 reads `docker inspect` output through `image_config`, asks a throwaway `sleep`
@@ -993,7 +994,11 @@ changing any of them.
     -f no-cache=true` under the `actions: write` permission added alongside
     `issues: write` for exactly this. Three by default: enough for a rebuild
     that failed for an unrelated reason — a runner hiccup, a registry blip —
-    to get two more days to clear on its own before anyone has to look.
+    to get two more days to clear on its own before anyone has to look. The
+    attempts land at roughly 0h, 24h and 48h, but the give-up comment arrives
+    at about 72h, because the run that reaches the cap is the one that posts
+    it; and "days" carries about an hour and a half of slack each way, the
+    measured gap between scheduled runs being 22h45m to 25h37m rather than 24h.
     The count `steps.scan.outputs.count` carries is no use for pacing this: it
     stays non-zero on every scan the issue remains open for, including the
     ones that already gave up, so gating the dispatch on it would be the
@@ -1013,6 +1018,14 @@ changing any of them.
     `ci.yml`: `no-cache` was already a `workflow_dispatch` input, wired into
     both build steps, waiting for something to set it other than a person in
     the Actions tab.
+    The marker is also read back after it is written, by `confirmStamp`, and
+    a mismatch exits 1 rather than going on. It is the only state this job
+    has and it lives in a field other things write to — #381 acquired an
+    assignee nothing here sets, 87 seconds after this step created it — and
+    losing it is silent by construction: a marker that is gone reads back as
+    attempt 0, so the budget restarts and the cap never engages. A run that
+    cannot record an attempt must not spend one, because nothing would then
+    stop it spending the next either.
     Bumping the marker is `stampAttempts`, and it has to do two different
     things depending on what is already there: `sed` substitute an existing
     `rebuild-attempts=<n>` in place, or append a fresh one when the body has
@@ -1025,6 +1038,115 @@ changing any of them.
     machine that found the give-up path only ever started from a body this
     step had itself just created, so it never exercised the one state every
     pre-existing issue was actually in.
+    The dispatch also *waits*, and that half is not an optimisation. Firing
+    the rebuild and returning made the remedy automatic and left the
+    verification manual, because nothing in the tree could report back:
+    `ci.yml` holds no `issues` permission and touches the tracker in no step,
+    no `workflow_run` or `repository_dispatch` trigger starts this workflow,
+    and the close step reads the count from the scan this run already
+    performed — so the issue a finding opens could only ever be closed by a
+    *later* run of this workflow, and the only thing that starts one is the
+    next day's cron. Issue #381 is what that cost, measured: the rebuild this
+    step dispatched at 11:26 published an image with the fix at 11:33, and the
+    issue stayed open and the run stayed red for the twenty-four hours until
+    the next scheduled scan, over an image that was already clean. So the step
+    now polls for the run it started — `gh workflow run` returns no id and the
+    API offers no handle, so it takes two floors before dispatching, the newest
+    `workflow_dispatch` ci run id on `master` and a timestamp, and claims the
+    oldest run above both — waits for that run on a bound of its own well
+    inside the job's, and hands the next step a conclusion. Every way out other than `success`
+    leaves the re-scan unrun and the run red, which is exactly what this job
+    did before.
+    What the re-scan then compares is digests, not only counts. **Publish
+    latest** stands down *without failing* when `master`'s head moved under
+    it, so a ci run can conclude `success` having left `latest` exactly where
+    it was; the count would come back unchanged and reporting that as "the
+    rebuild did not fix it" would be a claim about a rebuild that never
+    reached the tag. And a clean re-scan spares the run rather than only
+    closing the issue: the failed-run email exists to fetch a person, and a
+    run that applied the remedy, watched it land and closed its own issue has
+    nobody to fetch — a red nobody acts on is the "teach everyone to filter
+    it" failure this invariant already avoids for comments, spent on attention
+    instead. The record is the issue, opened and closed.
+    The condition that decides between those two reads a *word*, and that is
+    the single most load-bearing character of the change. A step that did not
+    run contributes no outputs, so `steps.rescan.outputs.count` is Null rather
+    than the empty string it reads as — and github's comparison operators
+    coerce a mismatched pair to numbers, where Null is 0, the string `'0'` is
+    0, and the empty string is 0 as well. `steps.rescan.outputs.count == '0'`
+    is therefore *true* on precisely the paths where the re-scan did not
+    happen: a rebuild that failed, was cancelled, never appeared, outlasted
+    the wait, or published nothing the tag points at. Written that way the job
+    closed a live vulnerability issue saying the image "no longer has a
+    vulnerability with a fix available" and went green — six of the nine
+    reachable end states inverted, all six of them the failure states, which
+    is strictly worse than the twenty-four hours this was written to remove.
+    `'clean'` parses as NaN, NaN equals nothing including itself, so a word
+    cannot do that. The older conditions in this file are safe by the same
+    accident and not by design (`== 'true'`, `== 'success'`), which is why
+    `tests/test_scan.py` now fails on any condition comparing a skippable
+    step's output against a numeric literal rather than on these two by name.
+    Two smaller things the same review settled. The timestamp floor above is
+    one of them, and it is there because an id floor alone reads 0 when the
+    listing comes back empty — no prior dispatch on a fresh fork, or one
+    transient API failure — and the `min` then claims the oldest run in the
+    window rather than the newest: one that finished days ago, over the image
+    just scanned, with conclusion `success`. And the wait's bound has to stay
+    well inside the job's `timeout-minutes`, because a job killed by that is
+    *cancelled* rather than failed, and github's notification for a scheduled
+    workflow fires on failure: the one way out of here that would turn the
+    alarm off instead of leaving it red.
+    The attempt is spent by the step above before this one learns anything, so
+    a rebuild that never ran used to cost a day of budget anyway. It is given
+    back now, and only where the rebuild demonstrably never built: `cancelled`
+    — `ci.yml`'s concurrency group puts a dispatch on `master` in the same
+    group as the push run for that commit and cancels it when a third arrives
+    — and the case where no run ever appeared. A rebuild that *failed* is not
+    refunded, because that is the runner hiccup the three attempts are sized
+    for; nor are `timeout` and `unreadable`, where the run may be building this
+    minute and only this job stopped looking. The counter is restored to the
+    value the issue step read rather than decremented from whatever is found,
+    since the body is editable by other things, and the refund comments once:
+    the step above has already said an attempt was dispatched, and walking that
+    back in silence leaves the issue claiming a count it no longer has.
+    Per *finding* is the counter's whole claim, and for a while it was not
+    true of the code, which matched the issue on its title alone and held one
+    open until the scan was clean about everything. A vulnerability arriving
+    while the issue was open therefore inherited whatever budget the previous
+    one had already spent, and one arriving on day three reached the give-up
+    branch having had no rebuild attempted for it at all — the exact state
+    this invariant exists to prevent, reached faster than by any of the routes
+    it does describe. The marker now carries the ids as well as the count
+    (`<!-- rebuild-attempts=<n> seen=<CVE,CVE,…> -->`), and an id the issue has
+    not been retried for before restarts the budget. Ids only accumulate, so a
+    finding that is fixed and returns is not handed a second budget, and the
+    cron still paces the whole thing at one rebuild a day however many
+    findings arrive. A marker written before this carries no ids, which reads
+    as every current finding being unseen and restarts the budget once: what
+    those attempts were spent on is recorded nowhere, so the only thing that
+    can be said about today's findings is that nothing says they were covered.
+    A step and not a second trigger, which is the obvious fix and is the
+    wrong one. The pacing this invariant rests on is a property of the
+    *trigger list*, not of the cap: nothing in the step compares timestamps
+    or days, it simply bumps the counter once per scan run that finds the
+    issue open, so "three attempts" means "three days" only while a daily
+    cron is the sole automatic trigger. A `workflow_run` listener on `ci`
+    would silently turn a three-day budget into a three-event one. It is
+    worse than that arithmetic suggests, twice over. `ci.yml` triggers on
+    `push` to every branch, on `pull_request` and on `workflow_dispatch`, so
+    any contributor's branch push during an open finding would consume an
+    attempt — and consume it by dispatching `ci.yml` on `master` with
+    `no-cache`, which runs **Publish latest** and moves the tag eleven
+    million pulls point at. A branch push acquiring that power is a much
+    larger change than the one being made. And chaining the scan to its own
+    rebuild spends all three attempts inside about twenty minutes rather than
+    across three days, which makes attempts two and three worthless on their
+    own terms: all three builds then `apt-get update` against the same
+    archive snapshot, so "the archive did not have the fix yet" — one of the
+    two failure modes the issue body names the retry for — stops being
+    something the retry can cover. Waiting inside the run buys the same
+    minutes-instead-of-a-day close without touching the trigger list at all.
+    (issue #381)
 
 37. **The `Dockerfile` runs `apt-get -y full-upgrade` before the named
     install, and `apt-get -y autoremove --purge` after it.** Without them, a
