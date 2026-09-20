@@ -1006,8 +1006,10 @@ changing any of them.
     for the issue itself, spent on compute instead of noise. What paces it
     instead is state the job has nowhere else to keep, since nothing here
     checks the repository out and a label has to already exist in the
-    repository before `gh issue edit --add-label` can set it: a
-    `<!-- rebuild-attempts=<n> -->` marker at the end of the issue body,
+    repository before `gh issue edit --add-label` can set it: an HTML comment
+    at the end of the issue body carrying the count — and, since the
+    per-finding change further down, the ids it was spent on — spelled out
+    below where that change is described,
     written on create, bumped by one on every retry, and bumped one further
     on the run that reaches the cap so that run's give-up comment does not
     repeat on every later scan while the issue stays open. That last part

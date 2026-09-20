@@ -238,3 +238,33 @@ def test_the_scan_job_allows_the_longest_run_in_the_tree():
         f"CLAUDE.md says the scan job's timeout is the longest in the tree; "
         f"these reach or pass it: {longer}"
     )
+
+
+def test_the_documented_marker_is_the_one_the_workflow_writes():
+    """The marker is described in CLAUDE.md where the pacing is explained and
+    again where the per-finding budget is, and the second description is the
+    one that grew a `seen=` list. A reader who stops at the first gets a shape
+    the workflow has not written since, which is how the two came apart in the
+    first place: whoever adds a field to the marker edits the paragraph they
+    are working in and not the other one.
+    """
+    candidates = re.findall(
+        r"<!-- rebuild-attempts=.*?-->",
+        scan_steps()["Open or retry the finding issue"]["run"],
+    )
+    # One of those is the search side of stampAttempts' sed, which carries a
+    # character class rather than a value and deliberately matches a marker
+    # with no ids in it -- that is what migrates an older one.
+    written = [marker for marker in candidates if "[0-9]" not in marker]
+    assert written, "the create path no longer writes a marker at all"
+    stale_writes = [marker for marker in written if "seen=" not in marker]
+    assert not stale_writes, f"the workflow still writes a marker with no ids: {stale_writes}"
+
+    documented = re.findall(
+        r"<!-- rebuild-attempts=.*?-->", (REPO_ROOT / "CLAUDE.md").read_text()
+    )
+    assert documented, "CLAUDE.md no longer spells the marker out anywhere"
+    stale = [marker for marker in documented if "seen=" not in marker]
+    assert not stale, (
+        f"CLAUDE.md spells the marker without the ids the workflow puts in it: {stale}"
+    )
