@@ -50,7 +50,7 @@ why merge commits name someone else's namespace.
 | `.github/workflows/test.yml` | `name: test`. Four jobs: **Event File**, **Pytest**, **Pytest (arm64)** and **Pytest (arm/v7, emulated)**. Spelled out rather than written as a matrix; the file says why. |
 | `.github/workflows/test-results.yml` | On `workflow_run` of `test`, downloads the junit artifacts and publishes them as the **Test Results** check. |
 | `.github/workflows/lint.yml` | `name: lint`. Two jobs, each pinned and checksummed: `shellcheck`, displayed as **ShellCheck**, runs `shellcheck -S error` over `run`, `healthcheck` and the session-start hook — the only threshold the image scripts pass; `ruff`, displayed as **Ruff**, runs `ruff check --no-cache --select F,B tests` — pyflakes and bugbear over all the python in the tree. The only two linters there are, and neither reads a config file. |
-| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker; each of the first `MAX_REBUILD_ATTEMPTS` runs that finds the issue still open also dispatches **ci.yml** on `master` with `no-cache` set, *waits for that run* and re-scans what it published, so the run that applied the remedy is the one that closes the issue rather than the next morning's — see invariant 36. The waiting is why its `timeout-minutes` is the tree's longest. |
+| `.github/workflows/scan.yml` | `name: scan`. One job, `trivy`, displayed as **Image Scan**: on a daily `schedule:` and on `workflow_dispatch`, downloads a pinned, checksummed trivy and scans the *published* image at `--ignore-unfixed --severity HIGH,CRITICAL`. The only workflow with a `schedule:`, and the only one that reports nothing on a pull request at all — `test-results.yml` has no `pull_request` trigger either, but its `workflow_run` on `test` puts a check there anyway. Files one issue when it finds something and closes it when it stops, which is the only thing in the tree that writes to the tracker; each of the first `MAX_REBUILD_ATTEMPTS` runs that finds the issue still open also dispatches **ci.yml** on `master` with `no-cache` set, *waits for that run* and re-scans what it published, so the run that applied the remedy is the one that closes the issue rather than the next morning's — see invariant 36. The waiting is why its `timeout-minutes` is an hour where no other job's reaches half of one, and why the wait has a bound of its own well inside it. |
 | `.github/workflows/dependabot-auto-merge.yml` | On `pull_request`, for `dependabot[bot]` only: enables auto-merge for semver-minor and semver-patch updates. Its header comment records the check names that *exist* and the two repository settings it depends on; which of them are *required* is the ruleset below. |
 | `SECURITY.md` | Where to report a vulnerability, and — the half that is actually load-bearing — what is *not* one here: the open relay default (invariant 23), no client TLS, starting as root, and a scanner row with no fixed version. Without that, a policy invites reports about behaviour the README documents as deliberate. Names no address: it points at github's private vulnerability reporting, which needs a repository setting rather than a file. |
 | `.github/dependabot.yml` | `github-actions` weekly (grouped minor/patch and major), `docker` daily for the base image, `pip` weekly for the pinned test dependencies in `tests/`, `docker` weekly on `/tests`, which covers both anchors there. |
@@ -1046,6 +1046,38 @@ changing any of them.
     nobody to fetch — a red nobody acts on is the "teach everyone to filter
     it" failure this invariant already avoids for comments, spent on attention
     instead. The record is the issue, opened and closed.
+    The condition that decides between those two reads a *word*, and that is
+    the single most load-bearing character of the change. A step that did not
+    run contributes no outputs, so `steps.rescan.outputs.count` is Null rather
+    than the empty string it reads as — and github's comparison operators
+    coerce a mismatched pair to numbers, where Null is 0, the string `'0'` is
+    0, and the empty string is 0 as well. `steps.rescan.outputs.count == '0'`
+    is therefore *true* on precisely the paths where the re-scan did not
+    happen: a rebuild that failed, was cancelled, never appeared, outlasted
+    the wait, or published nothing the tag points at. Written that way the job
+    closed a live vulnerability issue saying the image "no longer has a
+    vulnerability with a fix available" and went green — six of the nine
+    reachable end states inverted, all six of them the failure states, which
+    is strictly worse than the twenty-four hours this was written to remove.
+    `'clean'` parses as NaN, NaN equals nothing including itself, so a word
+    cannot do that. The older conditions in this file are safe by the same
+    accident and not by design (`== 'true'`, `== 'success'`), which is why
+    `tests/test_scan.py` now fails on any condition comparing a skippable
+    step's output against a numeric literal rather than on these two by name.
+    Two smaller things the same review settled. The run the wait attaches to
+    is found by *two* floors, an id and a timestamp: an id floor alone reads 0
+    when the listing comes back empty, and the `min` then claims the oldest
+    run in the window — one that finished days ago, over the image just
+    scanned, with conclusion `success`. And the wait's bound has to stay well
+    inside the job's `timeout-minutes`, because a job killed by that is
+    *cancelled* rather than failed, and github's notification for a scheduled
+    workflow fires on failure: the one way out of here that would turn the
+    alarm off instead of leaving it red.
+    One thing it did not settle, and worth knowing: the attempt is spent by
+    the step above before this one learns whether the rebuild ran at all, so a
+    build cancelled by `ci.yml`'s concurrency group still costs a day of
+    budget. Invariant 36's three attempts are the slack for exactly that, so
+    it is covered rather than free.
     Per *finding* is the counter's whole claim, and for a while it was not
     true of the code, which matched the issue on its title alone and held one
     open until the scan was clean about everything. A vulnerability arriving
