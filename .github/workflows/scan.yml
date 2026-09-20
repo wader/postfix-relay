@@ -2,14 +2,26 @@ name: scan
 
 on:
   schedule:
-    # Daily, and deliberately not on the hour: github queues everything that
-    # asked for :00 together, and a job nobody is waiting for should not be in
-    # that queue.
-    #
     # Daily is the cadence the thing being watched deserves. Debian ships a
     # fix, and this image picks it up when its base tag moves -- dated
     # trixie-*-slim tags land every two to three weeks -- so the window is
     # weeks wide and a daily look is the cheapest thing that notices inside it.
+    #
+    # The minute was chosen to stay out of the crowd that asks for :00. It does
+    # not do that, and the reason is worth writing down rather than leaving as
+    # a rationale nobody rechecked: github delays a scheduled run by whatever
+    # it delays it by, and here that has been between 4h32m and 6h34m on every
+    # one of the fifteen scheduled runs since this file was added, a median of
+    # 5h08m. This is a late-morning job that asks to be an early-morning one.
+    # So the minute is decorative at that scale, the hour is not the hour, and
+    # what actually bounds anything is the gap between runs -- measured at
+    # 22h45m to 25h37m, which is the "days" the retry ladder in invariant 36
+    # counts in.
+    #
+    # Left where it is deliberately. Nothing here wants a particular time of
+    # day; moving it would only trade one unpredictable delay for another, and
+    # the one property that matters -- once a day, near enough -- already
+    # holds.
     - cron: '17 6 * * *'
   workflow_dispatch:
 
