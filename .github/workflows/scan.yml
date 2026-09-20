@@ -68,7 +68,7 @@ jobs:
   trivy:
     name: "Image Scan"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       # Pinned and checksummed, and nothing bumps it, the way lint.yml installs
       # shellcheck -- and here the reason is not hypothetical. The
@@ -153,7 +153,13 @@ jobs:
             "${IMAGE}"
           count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${RUNNER_TEMP}/trivy.json")
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
-          echo "${count} finding(s) with a fix available in ${IMAGE}"
+          # Which image this verdict is about, for the re-scan below to compare
+          # against. A tag is a moving name and the whole point of the rebuild
+          # is to move it, so the count alone does not say whether a later scan
+          # looked at a different image or at the same one twice.
+          digest=$(jq -r '.Metadata.RepoDigests[0] // empty' "${RUNNER_TEMP}/trivy.json")
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "${count} finding(s) with a fix available in ${digest:-${IMAGE}}"
           trivy convert --format table "${RUNNER_TEMP}/trivy.json" \
             | tee "${RUNNER_TEMP}/trivy.txt"
         env:
@@ -196,8 +202,10 @@ jobs:
               echo "The remedy is a build that re-resolves the packages, and this run has"
               echo "already dispatched the **ci** workflow on \`master\` with"
               echo "**Rebuild without the layer cache** ticked to do it (attempt 1 of"
-              echo "${MAX_REBUILD_ATTEMPTS}) -- see the Actions tab for its progress. If the"
-              echo "archive did not have the fix yet or that rebuild failed, tomorrow's scan"
+              echo "${MAX_REBUILD_ATTEMPTS}) -- see the Actions tab for its progress. That"
+              echo "same run waits for the rebuild, re-scans what it published and closes"
+              echo "this issue itself if the finding is gone. If the archive did not have"
+              echo "the fix yet, or that rebuild failed, tomorrow's scan"
               echo "retries on its own, up to ${MAX_REBUILD_ATTEMPTS} attempts total; after"
               echo "that it stops and leaves this issue open rather than trying forever. The"
               echo "manual remedy still applies at any point: merge the pending base image"
@@ -248,7 +256,7 @@ jobs:
             stampAttempts "$next" > "${RUNNER_TEMP}/issue.md"
             gh issue edit "$existing" --body-file "${RUNNER_TEMP}/issue.md"
             gh issue comment "$existing" --body \
-              "Still finding this. Dispatched another no-cache rebuild (attempt ${next} of ${MAX_REBUILD_ATTEMPTS}). [Scan run](${RUN_URL})"
+              "Still finding this. Dispatched another no-cache rebuild (attempt ${next} of ${MAX_REBUILD_ATTEMPTS}); this run waits for it and closes this issue if it clears the finding. [Scan run](${RUN_URL})"
             echo "Issue #${existing}: dispatching rebuild attempt ${next} of ${MAX_REBUILD_ATTEMPTS}."
             echo "dispatch=true" >> "${GITHUB_OUTPUT}"
           elif [ "$attempts" -eq "$MAX_REBUILD_ATTEMPTS" ] ; then
@@ -268,7 +276,7 @@ jobs:
             echo "dispatch=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Trigger a no-cache rebuild
+      - name: Trigger a no-cache rebuild and wait for it
         # The remedy the issue above names, done here instead of waiting for
         # someone to tick the box by hand: ci.yml's apt install reads the
         # archive fresh, but cache-from/cache-to make that layer a cache hit
@@ -283,15 +291,155 @@ jobs:
         # three-architecture build on every one of those would be the
         # daily-comment mistake the step above already avoids, spent on
         # compute instead of noise.
+        #
+        # And then it waits, which is why this step is no longer one line.
+        # Dispatching and returning left the remedy automatic and the
+        # verification manual: nothing starts this workflow except its own
+        # cron, ci.yml holds no "issues" permission and touches the tracker
+        # nowhere, and the close step below reads the count from the scan this
+        # run already did -- so the issue a finding opens can only be closed by
+        # a *later* run of this workflow, and the only thing that starts one is
+        # tomorrow's cron. Measured on issue #381: the rebuild this step
+        # dispatched at 11:26 published a fixed image at 11:33, and the issue
+        # and the red run stayed as they were for the rest of the day.
+        # Waiting here is what lets the step below ask whether the remedy
+        # worked, on the run that applied it.
+        #
+        # A step, deliberately, and not a second trigger on this workflow.
+        # The daily pacing the attempt counter rests on lives in the trigger
+        # list rather than in the counter -- nothing compares days, it bumps
+        # once per run that finds the issue open -- so a "workflow_run"
+        # listener on ci would turn a three-day budget into a three-event
+        # one. ci.yml runs on a push to every branch and on every pull
+        # request, so an unrelated branch push during an open finding would
+        # spend an attempt, and spend it by dispatching a no-cache master
+        # build that moves the latest tag. Chaining this workflow to its own
+        # rebuild also spends all three attempts inside twenty minutes,
+        # against one archive snapshot, which is the one thing the retry
+        # exists to sample more than once.
+        id: rebuild
         if: steps.issue.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: gh workflow run ci.yml --ref master -f no-cache=true
+        run: |
+          set -eu
+
+          # "gh workflow run" prints nothing identifying the run it starts, and
+          # the API offers no handle for it either, so it has to be recognised
+          # afterwards. Run ids increase, so the newest ci run that already
+          # exists is a floor and the oldest one above it is this one's.
+          # Narrowing to workflow_dispatch on master is what keeps an unrelated
+          # push build, whose id would also be higher, from being taken for it.
+          floor=$(gh run list --workflow ci.yml --branch master \
+            --event workflow_dispatch --limit 1 \
+            --json databaseId --jq '.[0].databaseId // 0')
+          gh workflow run ci.yml --ref master -f no-cache=true
+
+          # The dispatch is asynchronous: the run does not exist yet when the
+          # command above returns.
+          run=""
+          for _ in $(seq 1 24) ; do
+            run=$(gh run list --workflow ci.yml --branch master \
+              --event workflow_dispatch --limit 20 --json databaseId \
+              | jq --argjson floor "${floor}" \
+                  '[.[] | select(.databaseId > $floor) | .databaseId] | min // empty')
+            if [ -n "$run" ] ; then
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$run" ] ; then
+            echo "Dispatched, but no new ci run appeared within two minutes."
+            echo "conclusion=missing" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "run_id=${run}" >> "${GITHUB_OUTPUT}"
+          echo "Waiting for ${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${run}"
+
+          # Bounded, and deliberately well inside this job's own timeout: a
+          # rebuild that never finishes has to degrade to what this job did
+          # before -- issue open, run red, tomorrow's scan tries again --
+          # rather than have a cancelled job take the steps below down with it.
+          # A three-architecture build takes six to eight minutes; twenty-five
+          # is room for a queue, not for a hang. A "gh run view" that fails
+          # transiently is not a verdict, so it reads as "not finished yet" and
+          # the deadline is what ends the wait either way.
+          deadline=$(( SECONDS + 25 * 60 ))
+          status=""
+          conclusion=""
+          while [ "${SECONDS}" -lt "${deadline}" ] ; do
+            status=$(gh run view "$run" --json status --jq .status || echo "")
+            if [ "$status" = "completed" ] ; then
+              conclusion=$(gh run view "$run" --json conclusion --jq .conclusion || echo "")
+              break
+            fi
+            sleep 20
+          done
+
+          if [ "$status" != "completed" ] ; then
+            echo "ci run ${run} was still '${status:-unknown}' after 25 minutes; not re-scanning."
+            echo "conclusion=timeout" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "ci run ${run} finished: ${conclusion}"
+          echo "conclusion=${conclusion}" >> "${GITHUB_OUTPUT}"
+
+      - name: Re-scan what the rebuild published
+        # The question the run that applied a remedy is in the best position to
+        # answer, and the one nothing used to ask: did it work? Same command as
+        # the first scan, against the same tag, which now resolves to whatever
+        # ci.yml's "Publish latest" moved it to.
+        #
+        # Written out again rather than shared with the first scan because this
+        # job checks nothing out on purpose, so there is no script in the
+        # workspace to call twice -- and because the two differ: the table the
+        # first one renders is what the issue body quotes, and this one only
+        # has to reach a count.
+        #
+        # The digest comparison is not decoration. ci.yml's "Publish latest"
+        # stands down *without failing* when master's head moved under it, and
+        # the run conclusion is "success" either way; a build can also succeed
+        # having published nothing this tag would see. In both cases latest
+        # still resolves to the image that was just scanned, the count comes
+        # back unchanged, and reporting that as "the rebuild did not fix it"
+        # would be a claim about a rebuild that never reached the tag. The
+        # digests are what tell those apart from a remedy that genuinely
+        # failed. The first scan's digest can only be empty if trivy stopped
+        # reporting one, so an empty one compares equal to nothing and the
+        # count is used on its own.
+        id: rescan
+        if: steps.rebuild.outputs.conclusion == 'success'
+        env:
+          IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
+          BEFORE: "${{ steps.scan.outputs.digest }}"
+        run: |
+          set -eu
+          trivy image \
+            --scanners vuln \
+            --ignore-unfixed \
+            --severity HIGH,CRITICAL \
+            --format json \
+            --output "${RUNNER_TEMP}/rescan.json" \
+            --timeout 10m \
+            --exit-code 0 \
+            "${IMAGE}"
+          after=$(jq -r '.Metadata.RepoDigests[0] // empty' "${RUNNER_TEMP}/rescan.json")
+          if [ -n "$BEFORE" ] && [ "$after" = "$BEFORE" ] ; then
+            echo "${IMAGE} still resolves to ${after}: the rebuild published nothing new."
+            exit 0
+          fi
+          count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${RUNNER_TEMP}/rescan.json")
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${after}" >> "${GITHUB_OUTPUT}"
+          echo "${count} finding(s) with a fix available in ${after}"
+          trivy convert --format table "${RUNNER_TEMP}/rescan.json"
 
       - name: Close the finding issue
-        # The scan is clean, so whatever this job filed earlier is answered.
-        if: steps.scan.outputs.count == '0'
+        # A scan came back clean, so whatever this job filed earlier is
+        # answered -- either the one at the top of this run, or the one after
+        # the rebuild, which is the same verdict about a newer image.
+        if: steps.scan.outputs.count == '0' || steps.rescan.outputs.count == '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # This job checks nothing out, on purpose -- trivy pulls the
@@ -303,6 +451,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           IMAGE: "${{ steps.reponame.outputs.DOCKER_REPO }}:latest"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          CI_RUN: "${{ steps.rebuild.outputs.run_id }}"
+          RESCAN_DIGEST: "${{ steps.rescan.outputs.digest }}"
         run: |
           set -eu
           existing=$(gh issue list --state open --limit 100 --json number,title \
@@ -311,14 +461,38 @@ jobs:
             echo "Nothing open, nothing to close."
             exit 0
           fi
+          # Which of the two scans answered it is the thing a reader wants
+          # from this comment: a clean first scan means the finding went away
+          # on its own, and a clean re-scan means this run's rebuild is what
+          # took it away. Same verdict, different story.
+          if [ -n "${CI_RUN}" ] && [ -n "${RESCAN_DIGEST}" ] ; then
+            note="Cleared by the no-cache rebuild this run dispatched and waited for ([ci run](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${CI_RUN})); \`${IMAGE}\` now resolves to \`${RESCAN_DIGEST}\`. "
+          else
+            note=""
+          fi
           gh issue close "$existing" --comment \
-            "\`${IMAGE}\` no longer has a vulnerability with a fix available. [Scan run](${RUN_URL})"
+            "\`${IMAGE}\` no longer has a vulnerability with a fix available. ${note}[Scan run](${RUN_URL})"
 
       - name: Fail the run
         # Last, so the issue is filed before the job goes red. The email github
         # sends for a failed scheduled run is the immediate signal; the issue
         # is the one that is still there next week.
-        if: steps.scan.outputs.count != '0'
+        #
+        # A clean re-scan spares it, and that is the point rather than a
+        # softened alarm: the email exists to fetch a person, and this run
+        # already applied the remedy, watched it land and closed the issue it
+        # filed. A red run nobody needs to act on is the "teach everyone to
+        # filter it" failure the step above avoids for comments, spent on
+        # attention instead. The record is the issue, opened and closed. Every
+        # other way out of the rebuild -- failed, cancelled, never appeared,
+        # still timing out, or a latest that never moved -- leaves the re-scan
+        # count empty and lands here, red, exactly as before.
+        if: steps.scan.outputs.count != '0' && steps.rescan.outputs.count != '0'
+        env:
+          COUNT: "${{ steps.scan.outputs.count }}"
+          RESCAN: "${{ steps.rescan.outputs.count }}"
+          REBUILD: "${{ steps.rebuild.outputs.conclusion }}"
         run: |
-          echo "${{ steps.scan.outputs.count }} finding(s) with a fix available."
+          echo "${COUNT} finding(s) with a fix available."
+          echo "rebuild: ${REBUILD:-not dispatched}; re-scan: ${RESCAN:-did not run}"
           exit 1

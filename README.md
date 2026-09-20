@@ -647,10 +647,12 @@ it is — and the image is instead rebuilt when its Debian base tag moves, which
 is every few weeks, or sooner: a scheduled job scans the published image daily,
 and when it finds a vulnerability Debian has already shipped a fix for, it
 opens an issue and rebuilds the image itself, re-resolving the packages
-against the archive without waiting for the next base tag. If that rebuild
-does not clear it, the same job retries automatically for a few more days
-before giving up and leaving the issue for a person to look at — it stays
-open either way until a rebuild actually clears the finding. If it is
+against the archive without waiting for the next base tag. It then waits for
+that rebuild, scans what it published and closes the issue itself when the
+finding is gone, so the usual life of one is minutes rather than a day. If
+the rebuild does not clear it, the same job retries automatically for a few
+more days before giving up and leaving the issue for a person to look at — it
+stays open either way until a rebuild actually clears the finding. If it is
 quiet, that is the state it is expected to be in. You do not have to take
 that on trust, and your risk appetite may not be ours: the image is public, so
 
@@ -949,6 +951,7 @@ releasing something no check has seen.
 | `test_qshape.py` | The queue tool the troubleshooting section has users run |
 | `test_upgrade.py` | Starting on the state the last released image wrote, which is what the "Upgrading" section promises |
 | `test_ruleset.py` | The required status checks recorded in `.github/rulesets/master.json`, against the jobs that report them |
+| `test_scan.py` | What the daily image scan does with a finding: the rebuild it dispatches, the re-scan that says whether it worked, and the issue it then closes |
 
 Use the `postfix` fixture for a relay with the default configuration,
 `postfix_shared` for a configuration several tests read the same way, and
