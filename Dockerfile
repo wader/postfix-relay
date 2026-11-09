@@ -1,4 +1,4 @@
-FROM debian:trixie-20261027-slim
+FROM debian:trixie-20261104-slim
 LABEL org.opencontainers.image.authors="Mattias Wadman <mattias.wadman@gmail.com>"
 
 # postsrsd is optional and only installed where Debian builds it: it is missing
