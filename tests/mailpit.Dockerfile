@@ -11,4 +11,4 @@
 #
 # tests/ is excluded by .dockerignore, so this never reaches the build context
 # of the image itself.
-FROM axllent/mailpit:v1.33.1
+FROM axllent/mailpit:v1.34.0
